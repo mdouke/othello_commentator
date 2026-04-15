@@ -1,0 +1,16 @@
+# Core
+numpy
+opencv-python
+Pillow
+python-dotenv
+
+# LLM providers
+openai
+google-generativeai
+ollama
+
+# TTS fallback for non-macOS environments
+pyttsx3
+
+# Development / testing
+pytest

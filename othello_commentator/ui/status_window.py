@@ -1,4 +1,4 @@
-# front_gui.py
+# status_window.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 

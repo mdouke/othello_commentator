@@ -1,4 +1,4 @@
-# gemini_client.py
+# gemini_provider.py
 from __future__ import annotations
 import os
 import time
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import google.generativeai as genai
 from dotenv import load_dotenv
-from llm_iface import LLMClient, DeltaCallback
+from othello_commentator.llm.client_interface import LLMClient, DeltaCallback
 
 # テキスト特化モデル (軽量高速)
 _MODEL_NAME = "gemini-2.5-pro"

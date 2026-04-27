@@ -5,18 +5,18 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from commentary_service import CommentaryService
-from gui import ChatWindow
-from front_gui import FrontWindow
-from ipc import RealtimeProcessClient
-from message_router import MessageRouter
-from providers import build_providers
-from resume_manager import Mode, ResumeManager
-from runtime_state import EvalSettings, RuntimeState, TurnCycleState, UiControlState
-from state_processor import StateProcessor
-from state_utils import FlipState, transform_state
-from tts import build_speaker
-from ui_feedback import UiFeedbackCoordinator
+from othello_commentator.llm.commentary_orchestrator import CommentaryService
+from othello_commentator.ui.control_window import ChatWindow
+from othello_commentator.ui.status_window import FrontWindow
+from othello_commentator.app.realtime_process import RealtimeProcessClient
+from othello_commentator.app.runtime_message_router import MessageRouter
+from othello_commentator.llm.provider_registry import build_providers
+from othello_commentator.app.resume_controller import Mode, ResumeManager
+from othello_commentator.app.session_state import EvalSettings, RuntimeState, TurnCycleState, UiControlState
+from othello_commentator.app.state_service import StateProcessor
+from othello_commentator.domain.board_state import FlipState, transform_state
+from othello_commentator.audio.tts import build_speaker
+from othello_commentator.app.feedback_coordinator import UiFeedbackCoordinator
 
 
 @dataclass

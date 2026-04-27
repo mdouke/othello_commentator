@@ -1,9 +1,9 @@
-# gemma_local.py
+# gemma_provider.py
 from __future__ import annotations
 import logging
 from typing import Optional, Callable, Dict, Any, List
 
-from llm_iface import LLMClient, DeltaCallback
+from othello_commentator.llm.client_interface import LLMClient, DeltaCallback
 
 log = logging.getLogger(__name__)
 

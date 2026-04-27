@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Callable
 
-from state_utils import count_bw, normalize_board
+from othello_commentator.domain.board_state import count_bw, normalize_board
 
 log = logging.getLogger(__name__)
 

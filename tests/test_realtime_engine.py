@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from realtime_engine import (
+from othello_commentator.realtime.engine import (
     EngineConfig,
     RealtimeLoopState,
     SyncModeState,
@@ -14,7 +14,7 @@ from realtime_engine import (
     update_sync_tracking,
     update_total_tracking,
 )
-from realtime_protocol import RealtimeControlState
+from othello_commentator.realtime.control_protocol import RealtimeControlState
 
 
 def test_should_sample_board_when_waiting_for_move() -> None:
@@ -70,7 +70,7 @@ def test_handle_game_init_sets_initial_board_and_emits_state() -> None:
     loop_state = RealtimeLoopState(same_frames=10)
     config = EngineConfig(stable_n=10, min_stones_start=4)
 
-    with patch("realtime_engine.emit_state") as emit_state_mock:
+    with patch("othello_commentator.realtime.engine.emit_state") as emit_state_mock:
         initialized = handle_game_init(control_state, board, 4, loop_state, config)
 
     assert initialized is True
@@ -90,7 +90,7 @@ def test_update_sync_tracking_and_emit_sync_state() -> None:
     update_sync_tracking(sync_state, 4)
     assert sync_state.same_frames == 2
 
-    with patch("realtime_engine.emit_sync_state") as emit_sync_mock:
+    with patch("othello_commentator.realtime.engine.emit_sync_state") as emit_sync_mock:
         emitted = maybe_emit_sync_state(board, 4, sync_state, config)
 
     assert emitted is True

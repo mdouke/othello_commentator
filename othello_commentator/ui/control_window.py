@@ -3,8 +3,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Optional
 from datetime import datetime
-from board_panel import BoardPanel
-from typing import Callable, Optional
+from othello_commentator.ui.board_widget import BoardPanel
 
 
 class ChatWindow(tk.Tk):
@@ -717,7 +716,5 @@ class ChatWindow(tk.Tk):
     def is_trend_enabled(self) -> bool:
         return self.use_trend_var.get()
     
-
-
 
 

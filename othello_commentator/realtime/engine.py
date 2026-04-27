@@ -11,11 +11,17 @@ from typing import Optional, Protocol
 
 import cv2
 
-from board_tracker import BoardTracker
-from engine_log import LOG_H, LOG_W, add_log, render_log_img
-from othello_rules import ascii_with_moves, coord, diff_moves, legal_moves
-from othello_rules import evaluate_moves_for_board, is_board_full
-from realtime_protocol import RealtimeControlState, emit_end, emit_state, emit_sync_state, start_stdin_reader
+from othello_commentator.realtime.camera_board_tracker import BoardTracker
+from othello_commentator.realtime.overlay_log import LOG_H, LOG_W, add_log, render_log_img
+from othello_commentator.domain.othello_rules import ascii_with_moves, coord, diff_moves, legal_moves
+from othello_commentator.domain.othello_rules import evaluate_moves_for_board, is_board_full
+from othello_commentator.realtime.control_protocol import (
+    RealtimeControlState,
+    emit_end,
+    emit_state,
+    emit_sync_state,
+    start_stdin_reader,
+)
 
 Board = list[list[str]]
 RgbCell = tuple[int, int, int]

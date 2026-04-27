@@ -4,9 +4,9 @@ import json
 import logging
 from typing import Any
 
-from othello_rules import evaluate_moves_for_board, evaluate_position
-from runtime_state import EvalSettings, RuntimeState, TurnCycleState, UiControlState
-from state_utils import (
+from othello_commentator.domain.othello_rules import evaluate_moves_for_board, evaluate_position
+from othello_commentator.app.session_state import EvalSettings, RuntimeState, TurnCycleState, UiControlState
+from othello_commentator.domain.board_state import (
     FlipState,
     count_bw,
     move_count_from_board,

@@ -44,15 +44,26 @@
 
 ## Project Structure
 
-現時点では、アプリ全体を少しずつ分割整理しながら構成を改善しています。主要なファイルは次の通りです。
+現在のコードベースは、責務ごとにパッケージを分けた構成に整理しています。エントリポイントは [main.py](./main.py) に残しつつ、実装本体は [othello_commentator](./othello_commentator) 配下にまとめています。
 
-- [main.py](./main.py): アプリ起動エントリポイント
-- [app_bootstrap.py](./app_bootstrap.py): GUI、IPC、状態、サービスの組み立て
-- [realtime_engine.py](./realtime_engine.py): 盤面認識とリアルタイムイベント処理
-- [message_router.py](./message_router.py): 子プロセスからのメッセージ振り分け
-- [state_processor.py](./state_processor.py): 盤面状態の処理とアプリ更新
-- [providers.py](./providers.py): LLM プロバイダの初期化
-- [tests/test_realtime_engine.py](./tests/test_realtime_engine.py): リアルタイム処理の単体テスト
+- [main.py](./main.py): アプリ起動エントリポイント。GUI を立ち上げ、盤面認識用の子プロセスを起動します
+- [othello_commentator/app](./othello_commentator/app): アプリ全体の組み立て、IPC、セッション状態、再開制御、メッセージ振り分け
+- [othello_commentator/realtime](./othello_commentator/realtime): カメラ入力、盤面追跡、キャリブレーション、リアルタイム制御用の子プロセス
+- [othello_commentator/ui](./othello_commentator/ui): Tkinter ベースの操作画面、ステータス画面、盤面表示ウィジェット
+- [othello_commentator/llm](./othello_commentator/llm): LLM プロバイダ初期化、コメント生成、応答パース
+- [othello_commentator/audio](./othello_commentator/audio): 音声読み上げラッパー
+- [othello_commentator/domain](./othello_commentator/domain): オセロルール、盤面変換、座標処理などのドメインロジック
+- [othello_commentator/storage](./othello_commentator/storage): ログ保存、成果物パス、コメント集計出力
+- [devtools](./devtools): 盤面表示やリアルタイム状態確認のための補助ツール
+- [tests](./tests): 単体テスト
+
+とくに主要な実装の起点は次のファイルです。
+
+- [othello_commentator/app/bootstrap.py](./othello_commentator/app/bootstrap.py): GUI、状態、LLM、IPC の組み立て
+- [othello_commentator/realtime/engine.py](./othello_commentator/realtime/engine.py): 盤面認識とイベント検出の中核ループ
+- [othello_commentator/realtime/runner.py](./othello_commentator/realtime/runner.py): 子プロセス用エントリポイント
+- [othello_commentator/llm/provider_registry.py](./othello_commentator/llm/provider_registry.py): 利用可能な LLM プロバイダの初期化
+- [othello_commentator/ui/control_window.py](./othello_commentator/ui/control_window.py): メイン操作画面
 
 ## Environment
 
@@ -127,20 +138,26 @@ OPENAI_API_KEY=
 GOOGLE_API_KEY=
 ```
 
+必要に応じて、次の確認も行ってください。
+
+- `ollama list` で `gpt-oss:120b-cloud` が利用可能であることを確認する
+- macOS では Python / Terminal にカメラ権限を付与する
+- 初回起動時は OpenCV のキャリブレーション用ウィンドウが前面に出ない場合があるため、他のウィンドウの背後も確認する
+
 ## Run
 
 ```bash
-python main.py
+python3 main.py
 ```
 
-起動後は GUI から開始操作やキャリブレーションを行い、盤面認識と実況生成を進めます。
+起動すると Tkinter のメイン GUI と、盤面認識用の子プロセスが立ち上がります。初回はキャリブレーション用の OpenCV ウィンドウで盤面静止画の確定と四隅選択を行い、その後 GUI から開始操作や再開操作、キャリブレーションのやり直しを行います。
 
 ## Testing
 
-現時点ではリアルタイム処理の一部に対する単体テストを追加しています。
+現時点では、リアルタイム処理の一部に対する単体テストを追加しています。
 
 ```bash
-pytest
+python3 -m pytest
 ```
 
 テスト対象やカバレッジは今後拡充予定です。

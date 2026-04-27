@@ -1,4 +1,4 @@
-# board_panel.py
+# board_widget.py
 import tkinter as tk
 from typing import List, Optional, Iterable
 

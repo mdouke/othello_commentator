@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import List, Dict, Any
 from ollama import Client
-from llm_iface import LLMClient, DeltaCallback
+from othello_commentator.llm.client_interface import LLMClient, DeltaCallback
 
 MODEL_NAME = "gpt-oss:120b-cloud"
 

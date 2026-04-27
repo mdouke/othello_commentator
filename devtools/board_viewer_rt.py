@@ -1,10 +1,9 @@
 # board_viewer_rt.py
 from __future__ import annotations
-import os, json, threading, subprocess, sys   # ★ os を追加！
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+import json, threading, subprocess, sys
 from pathlib import Path
 import tkinter as tk
-from board_panel import BoardPanel
+from othello_commentator.ui.board_widget import BoardPanel
 
 class RTBoardWindow(tk.Tk):
     def __init__(self, cmd=None):
@@ -15,11 +14,16 @@ class RTBoardWindow(tk.Tk):
         self.panel = BoardPanel(self)
         self.panel.pack(fill="both", expand=True)
 
-        # --- realtime_othello.py をサブプロセス起動 ---
+        # --- runner.py をサブプロセス起動 ---
         if cmd is None:
-            # プロジェクト直下の realtime_othello.py を呼び出す
+            # パッケージ内の runner.py を呼び出す
             py = sys.executable
-            rt = Path(__file__).resolve().parent.parent / "realtime_othello.py"  # ★ 修正: 上の階層を参照
+            rt = (
+                Path(__file__).resolve().parent.parent
+                / "othello_commentator"
+                / "realtime"
+                / "runner.py"
+            )
             cmd = [py, str(rt)]
 
         self.proc = subprocess.Popen(

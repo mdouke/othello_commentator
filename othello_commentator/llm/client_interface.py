@@ -1,4 +1,4 @@
-# llm_iface.py
+# client_interface.py
 from __future__ import annotations
 from typing import Callable, Iterable, Optional, Protocol, Any, Dict
 

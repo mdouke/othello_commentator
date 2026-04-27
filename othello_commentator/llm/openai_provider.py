@@ -6,8 +6,8 @@ from typing import Optional, Callable, Dict, Any, List
 
 from dotenv import load_dotenv
 from openai import OpenAI
-from llm_iface import LLMClient, DeltaCallback
-from project_paths import ARTIFACTS_DIR, ensure_dir
+from othello_commentator.llm.client_interface import LLMClient, DeltaCallback
+from othello_commentator.storage.paths import ARTIFACTS_DIR, ensure_dir
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class ConversationLog:
 
 
 # ========== Prompt生成（VIEW前提でASCIIを自前生成） ==========
-def build_prompt_from_state_chatgpt(state: dict) -> str:
+def build_prompt_from_state_openai(state: dict) -> str:
     turn = state.get("turn", "B")
     turn_jp = "黒" if turn == "B" else "白"
 
@@ -223,7 +223,7 @@ class ChatGPTClient(LLMClient):
         return "".join(full_text)
 
     def build_prompt_from_state(self, state: dict) -> str:
-        return build_prompt_from_state_chatgpt(state)
+        return build_prompt_from_state_openai(state)
     
 # ========== ヘルパー：座標とASCII生成 ==========
 _FILES = "abcdefgh"

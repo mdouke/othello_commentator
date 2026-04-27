@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from project_paths import ARTIFACTS_DIR, SUMMARY_DIR, ensure_dir
+from othello_commentator.storage.paths import ARTIFACTS_DIR, SUMMARY_DIR, ensure_dir
 
 # ログの場所＆出力先
 LOG_PATH = ensure_dir(ARTIFACTS_DIR) / "temporary.jsonl"

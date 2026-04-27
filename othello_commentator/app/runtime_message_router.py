@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from resume_manager import Mode
-from runtime_state import RuntimeState, UiControlState
-from state_utils import FlipState
+from othello_commentator.app.resume_controller import Mode
+from othello_commentator.app.session_state import RuntimeState, UiControlState
+from othello_commentator.domain.board_state import FlipState
 
 
 class MessageRouter:

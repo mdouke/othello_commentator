@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from state_utils import FlipState, transform_coord
+from othello_commentator.domain.board_state import FlipState, transform_coord
 
 
 class UiFeedbackCoordinator:

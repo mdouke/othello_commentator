@@ -1,4 +1,4 @@
-# board_tracker.py
+# camera_board_tracker.py
 from __future__ import annotations
 import cv2, numpy as np
 from typing import List, Tuple

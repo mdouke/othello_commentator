@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-from project_paths import ARTIFACTS_DIR, ensure_dir
+from othello_commentator.storage.paths import ARTIFACTS_DIR, ensure_dir
 
 LOG_PATH = ensure_dir(ARTIFACTS_DIR) / "comments_log_ollama.jsonl"
 
@@ -75,4 +75,3 @@ def append_post(
     with LOG_PATH.open("a", encoding="utf-8") as f:
         json.dump(rec, f, ensure_ascii=False)
         f.write("\n")
-

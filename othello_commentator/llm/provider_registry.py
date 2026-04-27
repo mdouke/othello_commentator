@@ -12,7 +12,7 @@ def build_providers() -> dict[str, object]:
     既存 main.py と同等のプロバイダ初期化を行い、辞書で返す。
     キーは UI で表示されるプロバイダ名。
     """
-    env_path = Path(__file__).with_name(".env")
+    env_path = Path(__file__).resolve().parents[2] / ".env"
 
     providers: dict[str, object] = {}
 
@@ -23,22 +23,22 @@ def build_providers() -> dict[str, object]:
             log.warning("%s unavailable: %s", name, e)
 
     def build_chatgpt():
-        from chatgpt import ChatGPTClient
+        from othello_commentator.llm.openai_provider import ChatGPTClient
 
         return ChatGPTClient(env_path=env_path, model="gpt-4o")
 
     def build_gemini():
-        from gemini_client import GeminiClient
+        from othello_commentator.llm.gemini_provider import GeminiClient
 
         return GeminiClient(env_path=env_path)
 
     def build_ollama():
-        from ollama_provider import OllamaClient
+        from othello_commentator.llm.ollama_provider import OllamaClient
 
         return OllamaClient()
 
     def build_gemma():
-        from gemma_local import GemmaClient
+        from othello_commentator.llm.gemma_provider import GemmaClient
 
         return GemmaClient(
             model_name="google/gemma-2-2b-jpn-it",

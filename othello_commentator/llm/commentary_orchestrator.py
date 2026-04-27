@@ -4,10 +4,10 @@ import threading
 import time
 from typing import Any, Callable
 
-from comment_logger_ollama import append_post as ollama_append_post
-from comments import parse_comment_for_move
-from runtime_state import RuntimeState
-from state_utils import FlipState, transform_state
+from othello_commentator.storage.ollama_comment_store import append_post as ollama_append_post
+from othello_commentator.llm.comment_parser import parse_comment_for_move
+from othello_commentator.app.session_state import RuntimeState
+from othello_commentator.domain.board_state import FlipState, transform_state
 
 
 class CommentaryService:

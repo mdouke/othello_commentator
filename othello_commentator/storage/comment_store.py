@@ -1,4 +1,4 @@
-# comment_log.py
+# comment_store.py
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 import json
 
-from project_paths import ARTIFACTS_DIR, ensure_dir
+from othello_commentator.storage.paths import ARTIFACTS_DIR, ensure_dir
 
 
 # 1行分のレコード

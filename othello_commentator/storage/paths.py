@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-ROOT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 LOG_DIR = ROOT_DIR / "logs"
 ARTIFACTS_DIR = ROOT_DIR / "artifacts"
 SUMMARY_DIR = ARTIFACTS_DIR / "summary"

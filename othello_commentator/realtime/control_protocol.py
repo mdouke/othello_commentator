@@ -7,7 +7,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
-from othello_rules import ascii_with_moves, coord, count_bw, winner_from_counts
+from othello_commentator.domain.othello_rules import ascii_with_moves, coord, count_bw, winner_from_counts
 
 
 @dataclass

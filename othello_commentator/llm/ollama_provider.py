@@ -95,11 +95,9 @@ E : 手番側の合法手
 
 def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: str) -> str:
     """通常手用（played_move が a1-h8）"""
-    phase, stance, next_move_no, turn, turn_jp = _phase_and_stance(pre_view)
+    phase, _stance, _next_move_no, _turn, turn_jp = _phase_and_stance(pre_view)
 
     played = played_move.lower()
-    pre_board = pre_view.get("board")
-    post_board = post_view.get("board")
     pre_moves = [m.lower() for m in (pre_view.get("moves") or [])]
     pre_evals = pre_view.get("evals") or {}
 
@@ -111,23 +109,35 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
     others_lines = [f"{m} : {pre_evals.get(m)}" for m in others]
     others_txt = "\n".join(others_lines) if others_lines else "（なし）"
 
-    pre_ascii = _ascii_board_with_E(pre_board, pre_moves) if pre_board else ""
-    post_ascii = _ascii_board_with_E(post_board, []) if post_board else ""
+    if phase == "序盤":
+        policy = "形勢を断定せず、構想・狙い・今後の展開への期待を語る。"
+    elif phase == "中盤":
+        policy = "狙いとリスクを短く拾い、局面が動く熱量を込めて語る。"
+    else:
+        policy = "勝敗への緊張感を強め、決着に近づく迫力を込めて語る。"
 
-    head = (
-        f"オセロをしていて{turn_jp}が{core_move}（評価値：{played_eval_txt}）に手を打って盤面が以下のように変わりました。"
-        f"この手が他に打てた手と比べて良かったのか悪かったのかニュアンスに含めながら、感情的な実況者のようなリアクションを生成してください。"
-        f"また局面の進行度（序盤/中盤/終盤）を考慮した上で、出力形式に合わせて40文字程度になるようにしてください。"
-    )
+    return f"""あなたはオセロ対局を盛り上げる実況者です.
+感情的だが、序盤では大げさに断定しすぎないでください。
 
-    return _common_post_prompt(
-        head=head,
-        stance=stance,
-        pre_ascii=pre_ascii,
-        post_ascii=post_ascii,
-        others_txt=others_txt,
-        output_key=played,  # 通常は "d6" など
-    )
+出力条件：
+- 必ず1行
+- 形式は {core_move} : "コメント"
+- コメント本文は40文字前後
+- 座標、評価値、数値を本文に含めない
+- Markdown禁止
+- 説明口調ではなく実況のリアクションにする
+
+局面段階：{phase}
+実況方針：{policy}
+
+手の情報：
+{turn_jp}が{core_move}に置いた。
+
+評価比較：
+{core_move}（評価値：{played_eval_txt}）
+他に打てた手
+{others_txt}
+"""
 
 
 def build_post_move_prompt_pass(pre_view: dict, post_view: dict) -> str:
@@ -318,7 +328,12 @@ class OllamaClient(LLMClient):
         stream = self.client.chat(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
-            options={"temperature": 0.2},
+            options={
+                "temperature": 0.4,
+                "top_p": 0.9,
+                "repeat_penalty": 1.1,
+            },
+            think="low",
             stream=True,
         )
 

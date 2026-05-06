@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import List, Dict, Any
 from ollama import Client
+from othello_commentator.domain.board_state import count_bw
 from othello_commentator.llm.client_interface import LLMClient, DeltaCallback
 
 MODEL_NAME = "gpt-oss:120b-cloud"
@@ -56,6 +57,32 @@ def _phase_and_stance(pre_view: dict) -> tuple[str, str, int, str, str]:
         )
 
     return phase, stance, next_move_no, turn, turn_jp
+
+
+def _stone_count_change_lines(pre_view: dict, post_view: dict) -> list[str]:
+    pre_board = pre_view.get("board")
+    post_board = post_view.get("board")
+    if not pre_board or not post_board:
+        return []
+
+    try:
+        pre_b, pre_w = count_bw(pre_board)
+        post_b, post_w = count_bw(post_board)
+    except Exception:
+        return []
+
+    diff = int(post_b) - int(post_w)
+    if diff > 0:
+        diff_text = f"黒が白より{diff}枚多くなった"
+    elif diff < 0:
+        diff_text = f"白が黒より{abs(diff)}枚多くなった"
+    else:
+        diff_text = "黒と白が同じ枚数になった"
+
+    return [
+        f"黒{pre_b}白{pre_w}から黒{post_b}白{post_w}になった",
+        f"石の数は、{diff_text}",
+    ]
 
 
 def _common_post_prompt(
@@ -116,6 +143,12 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
     else:
         policy = "勝敗への緊張感を強め、決着に近づく迫力を込めて語る。"
 
+    move_info_lines = [
+        f"{turn_jp}は{core_move}に置いた",
+        *_stone_count_change_lines(pre_view, post_view),
+    ]
+    move_info_text = "\n".join(f"- {line}" for line in move_info_lines)
+
     return f"""あなたはオセロ対局を盛り上げる実況者です.
 感情的だが、序盤では大げさに断定しすぎないでください。
 
@@ -123,7 +156,8 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
 - 必ず1行
 - 形式は {core_move} : "コメント"
 - コメント本文は40文字前後
-- 座標、評価値、数値を本文に含めない
+- 座標、評価値を本文に含めない
+- 石数や石数差の数字は、実況として自然な場合のみ本文に含めてよい
 - Markdown禁止
 - 説明口調ではなく実況のリアクションにする
 
@@ -131,7 +165,7 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
 実況方針：{policy}
 
 手の情報：
-{turn_jp}が{core_move}に置いた。
+{move_info_text}
 
 評価比較：
 {core_move}（評価値：{played_eval_txt}）

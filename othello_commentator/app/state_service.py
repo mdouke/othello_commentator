@@ -89,6 +89,7 @@ class StateProcessor:
 
         raw["pos_eval"] = self._safe_position_eval(board, turn if turn in ("B", "W") else "B", "pos_eval")
         black_eval = self._safe_position_eval(board, "B", "black_eval")
+        disc_diff = self._disc_diff(board)
 
         try:
             with self.eval_settings.lock:
@@ -118,6 +119,8 @@ class StateProcessor:
         self.app.after(0, self.app.update_board, view)
         if hasattr(self.app, "add_eval_point"):
             self.app.after(0, self.app.add_eval_point, move_no, black_eval)
+        if hasattr(self.app, "add_disc_diff_point"):
+            self.app.after(0, self.app.add_disc_diff_point, move_no, disc_diff)
 
         if self.ui_state.prompt_gate_open:
             if raw.get("game_over"):
@@ -128,7 +131,7 @@ class StateProcessor:
         else:
             self.runtime_state.pre_snapshot_view = view
 
-        self._update_turn_cycle(turn, move_no, raw, black_eval)
+        self._update_turn_cycle(turn, move_no, raw, black_eval, disc_diff)
         return True
 
     def recompute_current_state(self, depth: int) -> None:
@@ -155,6 +158,8 @@ class StateProcessor:
             if hasattr(self.app, "add_eval_point"):
                 move_no = move_count_from_board(board)
                 self.app.after(0, self.app.add_eval_point, move_no, black_eval)
+                if hasattr(self.app, "add_disc_diff_point"):
+                    self.app.after(0, self.app.add_disc_diff_point, move_no, self._disc_diff(board))
         except Exception as exc:
             self.log.warning(f"re-evaluate on depth change failed: {exc}")
 
@@ -170,12 +175,23 @@ class StateProcessor:
             bcnt, wcnt = count_bw(board)
             self.app.after(0, self.app.set_piece_counts, bcnt, wcnt)
 
+    def _disc_diff(self, board: list[list[str]] | None) -> int | None:
+        if not board:
+            return None
+        try:
+            bcnt, wcnt = count_bw(board)
+            return int(bcnt) - int(wcnt)
+        except Exception as exc:
+            self.log.warning(f"disc_diff failed: {exc}")
+            return None
+
     def _update_turn_cycle(
         self,
         turn: str | None,
         move_no: int,
         raw: dict[str, Any],
         black_eval: float | None,
+        disc_diff: int | None,
     ) -> None:
         cycle = self.cycle_state
         turn_history = self.runtime_state.turn_history
@@ -199,6 +215,8 @@ class StateProcessor:
                     self.app.after(0, self.app.add_turn_segment, cycle.start_move_no, move_no)
                 if hasattr(self.app, "add_turn_eval_point"):
                     self.app.after(0, self.app.add_turn_eval_point, move_no, black_eval)
+                if hasattr(self.app, "add_turn_disc_diff_point"):
+                    self.app.after(0, self.app.add_turn_disc_diff_point, move_no, disc_diff)
 
                 if black_eval is not None:
                     turn_index = len(turn_history) + 1

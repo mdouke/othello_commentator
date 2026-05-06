@@ -176,6 +176,14 @@ class ResumeManager:
             except Exception:
                 pass
 
+            try:
+                bcnt, wcnt = count_bw(snapshot.board_norm)
+                disc_diff = int(bcnt) - int(wcnt)
+                self._after("set_piece_counts", bcnt, wcnt)
+            except Exception:
+                disc_diff = None
+            self._after("restore_graph_history", snapshot.move_no, snapshot.black_eval, disc_diff)
+
             self.set_mode(Mode.LOCKED_SYNC, "target_selected")
             self._after("set_sync_status", f"一致待ち 0/{self.sync_streak_n}")
             self._after("set_resume_enabled", False)

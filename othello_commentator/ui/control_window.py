@@ -1,7 +1,7 @@
 from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from datetime import datetime
 from othello_commentator.ui.board_widget import BoardPanel
 
@@ -36,9 +36,11 @@ class ChatWindow(tk.Tk):
 
         self.depth_var = tk.IntVar(value=2)  # 探索深さ
 
-        # グラフ用データ（(move_no, eval) の配列）
-        self.eval_points: list[tuple[int, float]] = []
-        self.eval_points_turn: list[tuple[int, float]] = []
+        # グラフ用データ（(move_no, value) の配列）
+        self.eval_points: list[tuple[int, float | None]] = []
+        self.eval_points_turn: list[tuple[int, float | None]] = []
+        self.disc_diff_points: list[tuple[int, int | None]] = []
+        self.disc_diff_points_turn: list[tuple[int, int | None]] = []
         self.turn_segments: list[tuple[int, int]] = []
         self.max_moves = 60  # 横軸 0..60 固定
 
@@ -247,12 +249,12 @@ class ChatWindow(tk.Tk):
         for c in range(3):
             s.grid_columnconfigure(c, weight=1)
 
-        # --- 左 下段：評価履歴（手数, 黒視点評価）
-        self.eval_panel = tk.Frame(self.left_bottom)
-        self.eval_panel.pack(fill="both", expand=True, padx=8, pady=8)
+        # --- 左 下段：グラフ履歴（評価 / 石数差）
+        self.graph_panel = tk.Frame(self.left_bottom)
+        self.graph_panel.pack(fill="both", expand=True, padx=8, pady=8)
 
         # 最新表示
-        top_row = tk.Frame(self.eval_panel)
+        top_row = tk.Frame(self.graph_panel)
         top_row.pack(fill="x")
         tk.Label(top_row, text="手数:").pack(side="left")
         self.move_count_var = tk.StringVar(value="0")
@@ -260,17 +262,31 @@ class ChatWindow(tk.Tk):
 
         tk.Label(top_row, text="黒からみた評価値:").pack(side="left")
         self.last_black_eval_var = tk.StringVar(value="-")
-        tk.Label(top_row, textvariable=self.last_black_eval_var, width=10, anchor="w").pack(side="left", padx=(4, 0))
+        tk.Label(top_row, textvariable=self.last_black_eval_var, width=10, anchor="w").pack(side="left", padx=(4, 12))
+
+        tk.Label(top_row, text="石数差(B-W):").pack(side="left")
+        self.last_disc_diff_var = tk.StringVar(value="-")
+        tk.Label(top_row, textvariable=self.last_disc_diff_var, width=6, anchor="w").pack(side="left", padx=(4, 0))
+
+        self.graph_notebook = ttk.Notebook(self.graph_panel)
+        self.graph_notebook.pack(fill="both", expand=True, pady=(8, 0))
+        self.eval_graph_tab = tk.Frame(self.graph_notebook)
+        self.disc_diff_graph_tab = tk.Frame(self.graph_notebook)
+        self.graph_notebook.add(self.eval_graph_tab, text="黒視点評価")
+        self.graph_notebook.add(self.disc_diff_graph_tab, text="石数差")
 
         # グラフキャンバス（0..60 の横軸を固定）
-        self.eval_canvas = tk.Canvas(self.eval_panel, height=240, bg="white",
+        self.eval_canvas = tk.Canvas(self.eval_graph_tab, height=240, bg="white",
                                     highlightthickness=1, highlightbackground="#cccccc")
-        self.eval_canvas.pack(fill="both", expand=True, pady=(8, 0))
+        self.eval_canvas.pack(fill="both", expand=True)
 
-        
+        self.disc_diff_canvas = tk.Canvas(self.disc_diff_graph_tab, height=240, bg="white",
+                                          highlightthickness=1, highlightbackground="#cccccc")
+        self.disc_diff_canvas.pack(fill="both", expand=True)
 
         # リサイズ時に再描画
         self.eval_canvas.bind("<Configure>", lambda e: self._redraw_eval_graph())
+        self.disc_diff_canvas.bind("<Configure>", lambda e: self._redraw_disc_diff_graph())
 
         # 履歴リスト（例: " 12 : +0.45"）
         # self.eval_list = tk.Listbox(self.eval_panel, height=8)
@@ -577,6 +593,26 @@ class ChatWindow(tk.Tk):
     def add_turn_eval_point(self, move_no: int, black_eval: float | None):
         """１ターンが締まった直後に呼ぶ糖衣。内部的には is_turn_end=True で add_eval_point を再利用。"""
         self.add_eval_point(move_no, black_eval, is_turn_end=True)
+
+    def add_disc_diff_point(self, move_no: int, disc_diff: int | None, is_turn_end: bool = False):
+        """(手数, 黒石数-白石数) を履歴に追加/更新し、最新表示＋グラフを更新。"""
+        try:
+            self.move_count_var.set(str(move_no))
+            self.last_disc_diff_var.set("-" if disc_diff is None else f"{int(disc_diff):+d}")
+
+            value = None if disc_diff is None else int(disc_diff)
+            self._upsert_point(self.disc_diff_points, move_no, value)
+
+            if is_turn_end:
+                self._upsert_point(self.disc_diff_points_turn, move_no, value)
+
+            self._redraw_disc_diff_graph()
+        except Exception:
+            pass
+
+    def add_turn_disc_diff_point(self, move_no: int, disc_diff: int | None):
+        """１ターンが締まった直後に呼ぶ糖衣。"""
+        self.add_disc_diff_point(move_no, disc_diff, is_turn_end=True)
     
     def add_turn_segment(self, start_move_no: int, end_move_no: int):
         try:
@@ -586,6 +622,7 @@ class ChatWindow(tk.Tk):
                 return
             self.turn_segments.append((start_move_no, end_move_no))
             self._redraw_eval_graph()
+            self._redraw_disc_diff_graph()
         except Exception:
             pass
 
@@ -594,12 +631,50 @@ class ChatWindow(tk.Tk):
         try:
             self.eval_points.clear()
             self.eval_points_turn.clear()   # ← 追加
+            self.disc_diff_points.clear()
+            self.disc_diff_points_turn.clear()
             self.turn_segments.clear()       # ← 追加
             self.move_count_var.set("0")
             self.last_black_eval_var.set("-")
+            self.last_disc_diff_var.set("-")
             self._redraw_eval_graph()
+            self._redraw_disc_diff_graph()
         except Exception:
             pass
+
+    def restore_graph_history(self, move_no: int, black_eval: float | None, disc_diff: int | None):
+        """履歴から再開盤面を選んだとき、グラフもその手数まで巻き戻す。"""
+        try:
+            move_no = int(move_no)
+            self.eval_points = [(m, v) for (m, v) in self.eval_points if m <= move_no]
+            self.eval_points_turn = [(m, v) for (m, v) in self.eval_points_turn if m <= move_no]
+            self.disc_diff_points = [(m, v) for (m, v) in self.disc_diff_points if m <= move_no]
+            self.disc_diff_points_turn = [(m, v) for (m, v) in self.disc_diff_points_turn if m <= move_no]
+            self.turn_segments = [(s, e) for (s, e) in self.turn_segments if s <= move_no and e <= move_no]
+
+            self.move_count_var.set(str(move_no))
+            self.last_black_eval_var.set("-" if black_eval is None else f"{float(black_eval):+.2f}")
+            self.last_disc_diff_var.set("-" if disc_diff is None else f"{int(disc_diff):+d}")
+
+            self._upsert_point(self.eval_points, move_no, None if black_eval is None else float(black_eval))
+            self._upsert_point(self.disc_diff_points, move_no, None if disc_diff is None else int(disc_diff))
+
+            self._redraw_eval_graph()
+            self._redraw_disc_diff_graph()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _upsert_point(points: list[tuple[int, Any]], move_no: int, value: Any) -> None:
+        replaced = False
+        for i, (m, _) in enumerate(points):
+            if m == move_no:
+                points[i] = (move_no, value)
+                replaced = True
+                break
+        if not replaced:
+            points.append((move_no, value))
+        points.sort(key=lambda t: t[0])
 
 
     def _redraw_eval_graph(self):
@@ -712,9 +787,94 @@ class ChatWindow(tk.Tk):
         c.create_line(lx, ly, lx + 20, ly, fill="#cc3333", width=2)
         c.create_text(lx + 26, ly, text="ターン終了", anchor="w", fill="#444444", font=("", 9))
 
+    def _redraw_disc_diff_graph(self):
+        c = self.disc_diff_canvas
+        if not c:
+            return
+        c.delete("all")
+
+        W = c.winfo_width() or 1
+        H = c.winfo_height() or 1
+
+        pad_l, pad_r, pad_t, pad_b = 42, 12, 16, 28
+        title_h = 18
+        x0, y0 = pad_l, pad_t + title_h
+        x1, y1 = W - pad_r, H - pad_b
+        if x1 <= x0 or y1 <= y0:
+            return
+
+        data_blue = [(m, None if v is None else int(v)) for m, v in sorted(self.disc_diff_points, key=lambda t: t[0])]
+        data_red = [(m, None if v is None else int(v)) for m, v in sorted(self.disc_diff_points_turn, key=lambda t: t[0])]
+
+        vals = [v for _, v in data_blue if isinstance(v, int)] + \
+               [v for _, v in data_red if isinstance(v, int)]
+        max_abs = max([abs(v) for v in vals], default=0)
+        y_max = max(8, min(64, ((max_abs + 7) // 8) * 8))
+        y_mid = y0 + (y1 - y0) * 0.5
+        y_scale = (y1 - y0) / (2.0 * y_max)
+
+        c.create_rectangle(x0, y0, x1, y1, outline="#dddddd", fill="")
+        y_zero = y_mid
+        c.create_line(x0, y_zero, x1, y_zero, fill="#cccccc")
+
+        tick_specs = [
+            (-y_max, y1, f"-{y_max:d}"),
+            (0,      y_zero, "0"),
+            (+y_max, y0 + 2, f"+{y_max:d}"),
+        ]
+        for _, y_off, lbl in tick_specs:
+            c.create_line(x0 - 4, y_off, x0, y_off, fill="#666666")
+            c.create_text(x0 - 6, y_off, text=lbl, anchor="e", fill="#444444", font=("", 9))
+
+        max_moves = getattr(self, "max_moves", 60) or 60
+        for t in range(0, max_moves + 1, 10):
+            x = x0 + (x1 - x0) * (t / max_moves)
+            c.create_line(x, y1, x, y1 + 4, fill="#666666")
+            c.create_text(x, y1 + 6, text=str(t), anchor="n", fill="#444444", font=("", 9))
+
+        def to_px(m, v):
+            px = x0 + (x1 - x0) * (max(0, min(max_moves, m)) / max_moves)
+            py = y_mid - (v * y_scale)
+            return px, py
+
+        prev = None
+        for m, v in data_blue:
+            if v is None:
+                prev = None
+                continue
+            px, py = to_px(m, v)
+            if prev is not None:
+                c.create_line(prev[0], prev[1], px, py, fill="#3366cc", width=2)
+            prev = (px, py)
+
+        for m, v in reversed(data_blue):
+            if v is not None:
+                px, py = to_px(m, v)
+                c.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#3366cc", outline="")
+                break
+
+        blue_map = {m: v for m, v in data_blue if v is not None}
+        for m_start, m_end in self.turn_segments:
+            v_start = blue_map.get(m_start)
+            v_end = blue_map.get(m_end)
+            if v_start is None or v_end is None:
+                continue
+            px0, py0 = to_px(m_start, v_start)
+            px1, py1 = to_px(m_end, v_end)
+            c.create_line(px0, py0, px1, py1, fill="#cc3333", width=2)
+            c.create_oval(px1 - 3, py1 - 3, px1 + 3, py1 + 3, fill="#cc3333", outline="")
+
+        c.create_text((x0 + x1) / 2, pad_t, text="黒視点 石数差推移", anchor="n", fill="#666666", font=("", 12))
+
+        lx = x1 - 110
+        ly = y0 + 6
+        c.create_line(lx, ly, lx + 20, ly, fill="#3366cc", width=2)
+        c.create_text(lx + 26, ly, text="各手", anchor="w", fill="#444444", font=("", 9))
+        ly += 14
+        c.create_line(lx, ly, lx + 20, ly, fill="#cc3333", width=2)
+        c.create_text(lx + 26, ly, text="ターン終了", anchor="w", fill="#444444", font=("", 9))
+
     # LLM 用の getter（main 側から参照できるようにする）
     def is_trend_enabled(self) -> bool:
         return self.use_trend_var.get()
     
-
-

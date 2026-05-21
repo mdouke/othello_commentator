@@ -1,7 +1,7 @@
 # Real-time Othello Commentator
 
 <p align="center">
-  <img src="./docs/images/thumbnail.jpg" alt="Othello Commentator setup" width="600">
+  <img src="./docs/images/thumbnail.jpeg" alt="Othello Commentator setup" width="600">
 </p>
 
 実物のオセロ盤を USB カメラで認識し、着手のたびに大規模言語モデルが実況コメントを生成・音声再生するシステムです。

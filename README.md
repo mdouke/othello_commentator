@@ -44,7 +44,11 @@
 
 ## Demo
 
-- YouTube: https://youtu.be/OTV0zdRY-eQ
+<p align="center">
+  <a href="https://youtu.be/OTV0zdRY-eQ">
+    <img src="https://img.youtube.com/vi/OTV0zdRY-eQ/hqdefault.jpg" alt="Othello Commentator demo video" width="600">
+  </a>
+</p>
 
 ## Documentation Status
 

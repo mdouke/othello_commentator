@@ -66,7 +66,7 @@ class GeminiClient(LLMClient):
         moves_block = "\n".join(f"{m} :" for m in state["moves"])
         return (
             f"オセロをしていて{turn_jp}の番で、盤面は以下の通りです。"
-            f"差し手がそれぞれの合法手に置いたときの<<STYLE>>"
+            "差し手がそれぞれの合法手に置いたときの実況"
             f"リアクションを出力形式に合わせて答えてください。またそれぞれの手へのリアクションが40文字程度になるようにしてください。\n\n"
             "ASCHII形式での表示方法\n"
             ". : 何もないマス\n"
@@ -74,8 +74,8 @@ class GeminiClient(LLMClient):
             "W : 白のコマがおかれているマス\n"
             f"E : {turn_jp}の合法手\n\n"
             "解答形式:\n" \
-            "a1 : ここに<<STYLE>>リアクションを入れてください\n"
-            "b2 : ここに<<STYLE>>リアクションを入れてください\n"
+            "a1 : ここにリアクションを入れてください\n"
+            "b2 : ここにリアクションを入れてください\n"
             "盤面\n"
             f"{ascii_board}\n\n"
             "出力形式\n"

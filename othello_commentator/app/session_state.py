@@ -13,6 +13,7 @@ class RuntimeState:
     last_post_key: tuple[Any, ...] | None = None
     last_end_key: tuple[Any, ...] | None = None
     final_view: dict[str, Any] | None = None
+    last_comment: str | None = None
 
 
 @dataclass

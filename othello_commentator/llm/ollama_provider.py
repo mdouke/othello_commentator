@@ -5,9 +5,23 @@ from __future__ import annotations
 import os
 from typing import List, Dict, Any
 from ollama import Client
+from othello_commentator.domain.board_state import count_bw
 from othello_commentator.llm.client_interface import LLMClient, DeltaCallback
+from othello_commentator.storage.eval_history_store import eval_history_store
 
 MODEL_NAME = "gpt-oss:120b-cloud"
+
+COMMENT_MODE_INSTRUCTIONS = {
+    "実況コメント": "通常のオセロ実況として、局面の熱量と重要点を自然に伝えてください。",
+    "常に優しいコメント": "常に大げさなくらい褒め称える口調にしてください。手だけでなく、勇気、発想、粘り、勝負勘、人柄まで肯定し、どんな局面でも称賛を中心にしてください。",
+    "常にきついコメント": "常に否定的で辛口の口調にしてください。手だけでなく、判断、集中力、勝負勘、姿勢にも踏み込んで厳しく指摘してください。ただし人格そのものの価値を貶める断定、差別表現、乱暴な罵倒は避けてください。",
+}
+
+
+def _comment_mode_instruction(comment_mode: str) -> str:
+    mode = comment_mode if comment_mode in COMMENT_MODE_INSTRUCTIONS else "実況コメント"
+    return f"コメントモード：{mode}\n- {COMMENT_MODE_INSTRUCTIONS[mode]}"
+
 
 def _ascii_board_with_E(board_2d, legal_moves_coords: list[str] | None = None) -> str:
     # board_2d は 8x8 の ['.','B','W']
@@ -58,6 +72,192 @@ def _phase_and_stance(pre_view: dict) -> tuple[str, str, int, str, str]:
     return phase, stance, next_move_no, turn, turn_jp
 
 
+def _stone_count_change_lines(pre_view: dict, post_view: dict) -> list[str]:
+    pre_board = pre_view.get("board")
+    post_board = post_view.get("board")
+    if not pre_board or not post_board:
+        return []
+
+    try:
+        pre_b, pre_w = count_bw(pre_board)
+        post_b, post_w = count_bw(post_board)
+    except Exception:
+        return []
+
+    pre_diff = int(pre_b) - int(pre_w)
+    post_diff = int(post_b) - int(post_w)
+    if post_diff == 0:
+        status = "同じになった"
+    elif pre_diff != 0 and (pre_diff > 0) != (post_diff > 0):
+        status = "逆転した"
+    elif abs(post_diff) < abs(pre_diff):
+        status = "差が縮まった"
+    elif abs(post_diff) > abs(pre_diff):
+        status = "差が広がった"
+    else:
+        status = "差は変わらなかった"
+
+    return [
+        f"石数変化：黒{pre_b}白{pre_w}から黒{post_b}白{post_w}に変化",
+        f"石数の状況：{status}",
+    ]
+
+
+def _board_edge_corner_lines(post_view: dict) -> list[str]:
+    board = post_view.get("board")
+    if not board:
+        return []
+
+    try:
+        corner_coords = {(0, 0), (7, 0), (0, 7), (7, 7)}
+        edge_b = edge_w = corner_b = corner_w = 0
+        for y in range(8):
+            for x in range(8):
+                cell = board[y][x]
+                if (x, y) in corner_coords:
+                    if cell == "B":
+                        corner_b += 1
+                    elif cell == "W":
+                        corner_w += 1
+                elif x in (0, 7) or y in (0, 7):
+                    if cell == "B":
+                        edge_b += 1
+                    elif cell == "W":
+                        edge_w += 1
+    except Exception:
+        return []
+
+    if corner_b + corner_w > 0:
+        return [f"角の石数：黒{corner_b}白{corner_w}"]
+    if edge_b + edge_w > 0:
+        return [f"端の石数：黒{edge_b}白{edge_w}"]
+    return []
+
+
+def _coord_to_xy(move: str) -> tuple[int, int] | None:
+    move = (move or "").lower().strip()
+    if len(move) != 2:
+        return None
+
+    file_ch, rank_ch = move[0], move[1]
+    if file_ch < "a" or file_ch > "h" or rank_ch < "1" or rank_ch > "8":
+        return None
+
+    return ord(file_ch) - ord("a"), int(rank_ch) - 1
+
+
+def _move_position_label(move: str) -> str | None:
+    coord = _coord_to_xy(move)
+    if coord is None:
+        return None
+
+    x, y = coord
+    if x in (0, 7) and y in (0, 7):
+        return "角"
+    if x in (0, 7) or y in (0, 7):
+        return "端"
+    return None
+
+
+def _played_move_coord_line(move: str) -> str:
+    position_label = _move_position_label(move)
+    suffix = f"（{position_label}）" if position_label else ""
+    return f"打たれた手の座標：{move}{suffix}"
+
+
+def _flipped_direction_lines(pre_view: dict, played_move: str) -> list[str]:
+    board = pre_view.get("board")
+    player = (pre_view.get("turn") or "").upper().strip()
+    coord = _coord_to_xy(played_move)
+    if not board or player not in ("B", "W") or coord is None:
+        return []
+
+    x0, y0 = coord
+    opponent = "W" if player == "B" else "B"
+    direction_labels: list[str] = []
+    direction_specs = [
+        ("斜め", -1, -1),
+        ("縦", 0, -1),
+        ("斜め", 1, -1),
+        ("横", -1, 0),
+        ("横", 1, 0),
+        ("斜め", -1, 1),
+        ("縦", 0, 1),
+        ("斜め", 1, 1),
+    ]
+
+    for label, dx, dy in direction_specs:
+        x, y = x0 + dx, y0 + dy
+        seen_opponent = False
+        while 0 <= x < 8 and 0 <= y < 8 and board[y][x] == opponent:
+            seen_opponent = True
+            x += dx
+            y += dy
+
+        if seen_opponent and 0 <= x < 8 and 0 <= y < 8 and board[y][x] == player:
+            if label not in direction_labels:
+                direction_labels.append(label)
+
+    if not direction_labels:
+        return []
+
+    return [f"ひっくり返した方向：{'、'.join(direction_labels)}"]
+
+
+def _played_move_eval_lines(moves: list[str], evals: dict, played_move: str) -> list[str]:
+    played_move = (played_move or "").lower().strip()
+    ordered_moves = []
+    for move in [played_move, *moves]:
+        move = (move or "").lower().strip()
+        if move and move not in ordered_moves:
+            ordered_moves.append(move)
+
+    candidates: list[tuple[str, float, Any]] = []
+    for move in ordered_moves:
+        raw_eval = evals.get(move)
+        if raw_eval is None:
+            continue
+        try:
+            score = float(raw_eval)
+        except (TypeError, ValueError):
+            continue
+        candidates.append((move, score, raw_eval))
+
+    played_raw = evals.get(played_move)
+    played_eval_label = eval_history_store.classify(played_raw)
+    if not candidates:
+        return [
+            f"打たれた手の絶対評価：{played_eval_label}",
+            "その手番で打てた手の順位：順位不明",
+        ]
+
+    score_to_moves: dict[float, list[str]] = {}
+    for move, score, raw_eval in candidates:
+        score_to_moves.setdefault(score, []).append(move)
+
+    ranked_scores = sorted(score_to_moves.keys(), reverse=True)
+    if played_raw is not None:
+        try:
+            played_score = float(played_raw)
+        except (TypeError, ValueError):
+            played_score = None
+    else:
+        played_score = None
+
+    if played_score in score_to_moves:
+        rank = ranked_scores.index(played_score) + 1
+        tied = len(score_to_moves[played_score]) >= 2
+        total_moves = len(ordered_moves) or len(candidates)
+        rank_text = f"{total_moves}手中{'同率' if tied else ''}{rank}位"
+    else:
+        rank_text = "順位不明"
+
+    return [
+        f"打たれた手の絶対評価：{played_eval_label}",
+        f"その手番で打てた手の順位：（{rank_text}）",
+    ]
+
+
 def _common_post_prompt(
     head: str,
     stance: str,
@@ -65,6 +265,7 @@ def _common_post_prompt(
     post_ascii: str,
     others_txt: str,
     output_key: str,
+    comment_mode: str,
 ) -> str:
     """共通：プロンプト本文を組み立て"""
     return f"""{head}
@@ -88,49 +289,75 @@ E : 手番側の合法手
 他に打てた手とその評価値（この評価値の具体的な値は回答に含めないでください）
 {others_txt}
 
+{_comment_mode_instruction(comment_mode)}
+
 出力形式(必ず1行のみ)
 {output_key} : ""
 """
 
 
-def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: str) -> str:
+def build_post_move_prompt_normal(
+    pre_view: dict,
+    post_view: dict,
+    played_move: str,
+    comment_mode: str,
+) -> str:
     """通常手用（played_move が a1-h8）"""
-    phase, stance, next_move_no, turn, turn_jp = _phase_and_stance(pre_view)
+    phase, _stance, _next_move_no, _turn, turn_jp = _phase_and_stance(pre_view)
 
     played = played_move.lower()
-    pre_board = pre_view.get("board")
-    post_board = post_view.get("board")
     pre_moves = [m.lower() for m in (pre_view.get("moves") or [])]
     pre_evals = pre_view.get("evals") or {}
 
     core_move = played
-    played_eval = pre_evals.get(core_move)
-    played_eval_txt = str(played_eval) if played_eval is not None else "（なし）"
 
-    others = [m for m in pre_moves if m != core_move]
-    others_lines = [f"{m} : {pre_evals.get(m)}" for m in others]
-    others_txt = "\n".join(others_lines) if others_lines else "（なし）"
+    if phase == "序盤":
+        policy = "形勢を断定せず、構想・狙い・今後の展開への期待を語る。"
+    elif phase == "中盤":
+        policy = "狙いとリスクを短く拾い、局面が動く熱量を込めて語る。"
+    else:
+        policy = "勝敗への緊張感を強め、決着に近づく迫力を込めて語る。"
 
-    pre_ascii = _ascii_board_with_E(pre_board, pre_moves) if pre_board else ""
-    post_ascii = _ascii_board_with_E(post_board, []) if post_board else ""
+    move_info_lines = [
+        f"手番：{turn_jp}",
+        _played_move_coord_line(core_move),
+        *_played_move_eval_lines(pre_moves, pre_evals, core_move),
+        *_flipped_direction_lines(pre_view, core_move),
+        *_stone_count_change_lines(pre_view, post_view),
+    ]
+    move_info_text = "\n".join(f"- {line}" for line in move_info_lines)
+    board_info_lines = _board_edge_corner_lines(post_view)
+    board_info_text = "\n".join(f"- {line}" for line in board_info_lines) if board_info_lines else "- （なし）"
 
-    head = (
-        f"オセロをしていて{turn_jp}が{core_move}（評価値：{played_eval_txt}）に手を打って盤面が以下のように変わりました。"
-        f"この手が他に打てた手と比べて良かったのか悪かったのかニュアンスに含めながら、感情的な実況者のようなリアクションを生成してください。"
-        f"また局面の進行度（序盤/中盤/終盤）を考慮した上で、出力形式に合わせて40文字程度になるようにしてください。"
-    )
+    eval_history_store.append_evals(pre_evals)
 
-    return _common_post_prompt(
-        head=head,
-        stance=stance,
-        pre_ascii=pre_ascii,
-        post_ascii=post_ascii,
-        others_txt=others_txt,
-        output_key=played,  # 通常は "d6" など
-    )
+    return f"""あなたはオセロ対局を盛り上げる実況者です.
+感情的だが、序盤では大げさに断定しすぎないでください。
+
+出力条件：
+- 必ず1行
+- 形式は {core_move} : "コメント"
+- コメント本文は40文字前後、最大50文字まで
+- 手の情報は参考情報。全項目を盛り込まなくてよい
+- 実況では最も重要な要素を1〜2個だけ選ぶ
+- 座標、評価値、石数をすべて入れようとしない
+- 石数や石数差の数字は、実況として自然な場合のみ本文に含めてよい
+- 説明口調ではなく実況のリアクションにする
+
+{_comment_mode_instruction(comment_mode)}
+
+局面段階：{phase}
+実況方針：{policy}
+
+手の情報：
+{move_info_text}
+
+盤面の情報：
+{board_info_text}
+"""
 
 
-def build_post_move_prompt_pass(pre_view: dict, post_view: dict) -> str:
+def build_post_move_prompt_pass(pre_view: dict, post_view: dict, comment_mode: str) -> str:
     """パス用（played_move == 'pass' のとき）"""
     phase, stance, next_move_no, turn, turn_jp = _phase_and_stance(pre_view)
 
@@ -209,21 +436,27 @@ def build_post_move_prompt_pass(pre_view: dict, post_view: dict) -> str:
         post_ascii=post_ascii,
         others_txt=others_txt,
         output_key="pass",
+        comment_mode=comment_mode,
     )
 
 
-def build_post_move_prompt(pre_view: dict, post_view: dict, played_move: str) -> str:
+def build_post_move_prompt(
+    pre_view: dict,
+    post_view: dict,
+    played_move: str,
+    comment_mode: str,
+) -> str:
     """入口：通常/パスを振り分け"""
     played = (played_move or "").lower().strip()
     if played == "pass":
-        return build_post_move_prompt_pass(pre_view, post_view)
-    return build_post_move_prompt_normal(pre_view, post_view, played_move)
+        return build_post_move_prompt_pass(pre_view, post_view, comment_mode)
+    return build_post_move_prompt_normal(pre_view, post_view, played_move, comment_mode)
 
 def build_prompt_end_game(
     pre_state: Dict[str, Any],
     post_state: Dict[str, Any],
     end_info: Dict[str, Any],
-    style: str,
+    comment_mode: str,
 ) -> str:
     """
     main.py から END: を受け取ったときに呼ばれる想定。
@@ -260,9 +493,6 @@ def build_prompt_end_game(
         if isinstance(evals, dict) and (core_move in evals) and (evals.get(core_move) is not None):
             played_eval_txt = str(evals.get(core_move))
 
-    # スタイル（将来拡張用）：今回は文面は固定で、最後に口調ヒントだけ軽く付ける
-    style_hint = f"\n\n【口調】\n- {style}" if style else ""
-
     prompt = f"""あなたは感情的なオセロ実況者です。{turn_jp}が{core_move}（評価値：{played_eval_txt}）に手を打って終局しました。黒と白の最終的なコマ数と勝者を明示する感情的なコメントお願いします。。
 
 【終局情報】
@@ -276,10 +506,11 @@ def build_prompt_end_game(
    __end__: <本文>
  - 本文は合計80字前後
  - 盤面の具体（角、辺、手順、どこに置いた等）は言わない。根拠のない分析は禁止。
- - 代わりに抽象的に盛り上げる（「粘り勝ち」「逃げ切り」「最後まで拮抗」など）{style_hint}
+ - 代わりに抽象的に盛り上げる（「粘り勝ち」「逃げ切り」「最後まで拮抗」など）
+
+{_comment_mode_instruction(comment_mode)}
 """
-    # 将来のための置換（今回テンプレに<<STYLE>>は無いが一応）
-    return prompt.replace("<<STYLE>>", style)
+    return prompt
 
 class OllamaClient(LLMClient):
     def __init__(self):
@@ -309,7 +540,7 @@ class OllamaClient(LLMClient):
     def send_chat(self, prompt: str, callback: DeltaCallback) -> str:
         """
         main.py 側からは full = client.send_chat(prompt, on_delta) の形で呼ばれる想定。
-        - prompt: すでに <<STYLE>> 置換済み
+        - prompt: 生成済みプロンプト
         - callback: 逐次トークンを GUI に流す関数
         戻り値: 生成された全文テキスト
         """
@@ -318,7 +549,12 @@ class OllamaClient(LLMClient):
         stream = self.client.chat(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
-            options={"temperature": 0.2},
+            options={
+                "temperature": 0.4,
+                "top_p": 0.9,
+                "repeat_penalty": 1.1,
+            },
+            think="low",
             stream=True,
         )
 
@@ -338,26 +574,21 @@ class OllamaClient(LLMClient):
         pre_state: Dict[str, Any],
         post_state: Dict[str, Any],
         played_move: str,
-        style: str,
+        comment_mode: str,
     ) -> str:
-        # ここで「着手後実況」テンプレを組む
-        p = build_post_move_prompt(pre_state, post_state, played_move)
-
-        # <<STYLE>> が出てくる可能性があるならここで置換（今のテンプレには無いけど将来のため）
-        return p.replace("<<STYLE>>", style)
+        return build_post_move_prompt(pre_state, post_state, played_move, comment_mode)
     
     def build_prompt_end_game(
        self,
         pre_state: Dict[str, Any],
         post_state: Dict[str, Any],
         end_info: Dict[str, Any],
-        style: str,
+        comment_mode: str,
     ) -> str:
         # main.py から client.build_prompt_end_game(...) で呼ばれるため、メソッドとして生やす
-        p = build_prompt_end_game(
+        return build_prompt_end_game(
             pre_state=pre_state,
             post_state=post_state,
             end_info=end_info,
-            style=style,
+            comment_mode=comment_mode,
         )
-        return p.replace("<<STYLE>>", style)

@@ -161,7 +161,7 @@ def build_prompt_from_state_openai(state: dict) -> str:
 
     return (
         f"オセロをしていて{turn_jp}の番で、盤面は以下の通りです。"
-        f"差し手がそれぞれの合法手に置いたときの<<STYLE>>"
+        "差し手がそれぞれの合法手に置いたときの実況"
         "リアクションを、各手の評価値と局面の進行度（序盤/中盤/終盤）、"
         f"{trend_phrase}"
         "出力形式に合わせて答えてください。"

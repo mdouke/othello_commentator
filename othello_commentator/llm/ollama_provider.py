@@ -11,6 +11,18 @@ from othello_commentator.storage.eval_history_store import eval_history_store
 
 MODEL_NAME = "gpt-oss:120b-cloud"
 
+COMMENT_MODE_INSTRUCTIONS = {
+    "実況コメント": "通常のオセロ実況として、局面の熱量と重要点を自然に伝えてください。",
+    "常に優しいコメント": "常に大げさなくらい褒め称える口調にしてください。手だけでなく、勇気、発想、粘り、勝負勘、人柄まで肯定し、どんな局面でも称賛を中心にしてください。",
+    "常にきついコメント": "常に否定的で辛口の口調にしてください。手だけでなく、判断、集中力、勝負勘、姿勢にも踏み込んで厳しく指摘してください。ただし人格そのものの価値を貶める断定、差別表現、乱暴な罵倒は避けてください。",
+}
+
+
+def _comment_mode_instruction(comment_mode: str) -> str:
+    mode = comment_mode if comment_mode in COMMENT_MODE_INSTRUCTIONS else "実況コメント"
+    return f"コメントモード：{mode}\n- {COMMENT_MODE_INSTRUCTIONS[mode]}"
+
+
 def _ascii_board_with_E(board_2d, legal_moves_coords: list[str] | None = None) -> str:
     # board_2d は 8x8 の ['.','B','W']
     E = set(m.lower() for m in (legal_moves_coords or []))
@@ -253,6 +265,7 @@ def _common_post_prompt(
     post_ascii: str,
     others_txt: str,
     output_key: str,
+    comment_mode: str,
 ) -> str:
     """共通：プロンプト本文を組み立て"""
     return f"""{head}
@@ -276,12 +289,19 @@ E : 手番側の合法手
 他に打てた手とその評価値（この評価値の具体的な値は回答に含めないでください）
 {others_txt}
 
+{_comment_mode_instruction(comment_mode)}
+
 出力形式(必ず1行のみ)
 {output_key} : ""
 """
 
 
-def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: str) -> str:
+def build_post_move_prompt_normal(
+    pre_view: dict,
+    post_view: dict,
+    played_move: str,
+    comment_mode: str,
+) -> str:
     """通常手用（played_move が a1-h8）"""
     phase, _stance, _next_move_no, _turn, turn_jp = _phase_and_stance(pre_view)
 
@@ -324,6 +344,8 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
 - 石数や石数差の数字は、実況として自然な場合のみ本文に含めてよい
 - 説明口調ではなく実況のリアクションにする
 
+{_comment_mode_instruction(comment_mode)}
+
 局面段階：{phase}
 実況方針：{policy}
 
@@ -335,7 +357,7 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
 """
 
 
-def build_post_move_prompt_pass(pre_view: dict, post_view: dict) -> str:
+def build_post_move_prompt_pass(pre_view: dict, post_view: dict, comment_mode: str) -> str:
     """パス用（played_move == 'pass' のとき）"""
     phase, stance, next_move_no, turn, turn_jp = _phase_and_stance(pre_view)
 
@@ -414,21 +436,27 @@ def build_post_move_prompt_pass(pre_view: dict, post_view: dict) -> str:
         post_ascii=post_ascii,
         others_txt=others_txt,
         output_key="pass",
+        comment_mode=comment_mode,
     )
 
 
-def build_post_move_prompt(pre_view: dict, post_view: dict, played_move: str) -> str:
+def build_post_move_prompt(
+    pre_view: dict,
+    post_view: dict,
+    played_move: str,
+    comment_mode: str,
+) -> str:
     """入口：通常/パスを振り分け"""
     played = (played_move or "").lower().strip()
     if played == "pass":
-        return build_post_move_prompt_pass(pre_view, post_view)
-    return build_post_move_prompt_normal(pre_view, post_view, played_move)
+        return build_post_move_prompt_pass(pre_view, post_view, comment_mode)
+    return build_post_move_prompt_normal(pre_view, post_view, played_move, comment_mode)
 
 def build_prompt_end_game(
     pre_state: Dict[str, Any],
     post_state: Dict[str, Any],
     end_info: Dict[str, Any],
-    style: str,
+    comment_mode: str,
 ) -> str:
     """
     main.py から END: を受け取ったときに呼ばれる想定。
@@ -465,9 +493,6 @@ def build_prompt_end_game(
         if isinstance(evals, dict) and (core_move in evals) and (evals.get(core_move) is not None):
             played_eval_txt = str(evals.get(core_move))
 
-    # スタイル（将来拡張用）：今回は文面は固定で、最後に口調ヒントだけ軽く付ける
-    style_hint = f"\n\n【口調】\n- {style}" if style else ""
-
     prompt = f"""あなたは感情的なオセロ実況者です。{turn_jp}が{core_move}（評価値：{played_eval_txt}）に手を打って終局しました。黒と白の最終的なコマ数と勝者を明示する感情的なコメントお願いします。。
 
 【終局情報】
@@ -481,10 +506,11 @@ def build_prompt_end_game(
    __end__: <本文>
  - 本文は合計80字前後
  - 盤面の具体（角、辺、手順、どこに置いた等）は言わない。根拠のない分析は禁止。
- - 代わりに抽象的に盛り上げる（「粘り勝ち」「逃げ切り」「最後まで拮抗」など）{style_hint}
+ - 代わりに抽象的に盛り上げる（「粘り勝ち」「逃げ切り」「最後まで拮抗」など）
+
+{_comment_mode_instruction(comment_mode)}
 """
-    # 将来のための置換（今回テンプレに<<STYLE>>は無いが一応）
-    return prompt.replace("<<STYLE>>", style)
+    return prompt
 
 class OllamaClient(LLMClient):
     def __init__(self):
@@ -514,7 +540,7 @@ class OllamaClient(LLMClient):
     def send_chat(self, prompt: str, callback: DeltaCallback) -> str:
         """
         main.py 側からは full = client.send_chat(prompt, on_delta) の形で呼ばれる想定。
-        - prompt: すでに <<STYLE>> 置換済み
+        - prompt: 生成済みプロンプト
         - callback: 逐次トークンを GUI に流す関数
         戻り値: 生成された全文テキスト
         """
@@ -548,26 +574,21 @@ class OllamaClient(LLMClient):
         pre_state: Dict[str, Any],
         post_state: Dict[str, Any],
         played_move: str,
-        style: str,
+        comment_mode: str,
     ) -> str:
-        # ここで「着手後実況」テンプレを組む
-        p = build_post_move_prompt(pre_state, post_state, played_move)
-
-        # <<STYLE>> が出てくる可能性があるならここで置換（今のテンプレには無いけど将来のため）
-        return p.replace("<<STYLE>>", style)
+        return build_post_move_prompt(pre_state, post_state, played_move, comment_mode)
     
     def build_prompt_end_game(
        self,
         pre_state: Dict[str, Any],
         post_state: Dict[str, Any],
         end_info: Dict[str, Any],
-        style: str,
+        comment_mode: str,
     ) -> str:
         # main.py から client.build_prompt_end_game(...) で呼ばれるため、メソッドとして生やす
-        p = build_prompt_end_game(
+        return build_prompt_end_game(
             pre_state=pre_state,
             post_state=post_state,
             end_info=end_info,
-            style=style,
+            comment_mode=comment_mode,
         )
-        return p.replace("<<STYLE>>", style)

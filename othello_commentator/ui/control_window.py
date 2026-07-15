@@ -26,8 +26,9 @@ class ChatWindow(tk.Tk):
 
         self.provider_names = list(providers.keys())
         self.current_provider_name = tk.StringVar(value=self.provider_names[0])
-        self.style_var = tk.StringVar(value="感情的な実況者のような")
-
+        self.comment_mode_names = ["実況コメント", "常に優しいコメント", "常にきついコメント"]
+        self.current_comment_mode_name = tk.StringVar(value=self.comment_mode_names[0])
+        self._comment_mode_locked = False
         # 反転トグル（初期値は必要に応じて True/False に）
         # 追加: __init__ 内でロック状態フラグ
         self._flip_locked = False
@@ -187,8 +188,14 @@ class ChatWindow(tk.Tk):
         self.provider_combo.grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
-        tk.Label(s, text="リアクション文言:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
-        tk.Entry(s, textvariable=self.style_var, width=40).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        tk.Label(s, text="コメントモード:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        self.comment_mode_combo = ttk.Combobox(
+            s,
+            values=self.comment_mode_names,
+            textvariable=self.current_comment_mode_name,
+            state="readonly",
+        )
+        self.comment_mode_combo.grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
         self.btn_start = tk.Button(s, text="OKで開始", command=self._click_start)
@@ -530,8 +537,10 @@ class ChatWindow(tk.Tk):
     def current_provider(self) -> str:
         return self.current_provider_name.get()
 
-    def current_style(self) -> str:
-        return self.style_var.get()
+    def current_comment_mode(self) -> str:
+        mode = self.current_comment_mode_name.get()
+        return mode if mode in self.comment_mode_names else self.comment_mode_names[0]
+
 
     # 送信プロンプトを Chat タブに表示
     def add_chat_prompt(self, provider: str, prompt: str) -> None:
@@ -554,6 +563,14 @@ class ChatWindow(tk.Tk):
         try:
             self.flip_h_cb.configure(state="disabled")
             self.flip_v_cb.configure(state="disabled")
+        except Exception:
+            pass
+
+    def lock_comment_mode_controls(self):
+        """OKで開始後はコメントモードを固定"""
+        self._comment_mode_locked = True
+        try:
+            self.comment_mode_combo.configure(state="disabled")
         except Exception:
             pass
 

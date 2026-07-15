@@ -116,6 +116,9 @@ def bootstrap_application(script_path: Path, logger: logging.Logger) -> Bootstra
             if hasattr(app, "lock_flip_controls"):
                 app.lock_flip_controls()
 
+        if hasattr(app, "lock_comment_mode_controls"):
+            app.lock_comment_mode_controls()
+
         if not ui_state.prompt_gate_open:
             ui_state.prompt_gate_open = True
             raw0 = runtime_state.latest_raw

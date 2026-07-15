@@ -17,6 +17,7 @@ from othello_commentator.app.state_service import StateProcessor
 from othello_commentator.domain.board_state import FlipState, transform_state
 from othello_commentator.audio.tts import build_speaker
 from othello_commentator.app.feedback_coordinator import UiFeedbackCoordinator
+from othello_commentator.storage.eval_history_store import eval_history_store
 
 
 @dataclass
@@ -34,6 +35,8 @@ def bootstrap_application(script_path: Path, logger: logging.Logger) -> Bootstra
 
     app = ChatWindow(providers)
     front = FrontWindow(app)
+    if hasattr(app, "update_eval_boundaries"):
+        app.update_eval_boundaries(eval_history_store.summary())
 
     def tk_call(fn, *args):
         ev = threading.Event()

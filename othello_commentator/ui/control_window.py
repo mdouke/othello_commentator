@@ -272,8 +272,10 @@ class ChatWindow(tk.Tk):
         self.graph_notebook.pack(fill="both", expand=True, pady=(8, 0))
         self.eval_graph_tab = tk.Frame(self.graph_notebook)
         self.disc_diff_graph_tab = tk.Frame(self.graph_notebook)
+        self.eval_boundary_tab = tk.Frame(self.graph_notebook)
         self.graph_notebook.add(self.eval_graph_tab, text="黒視点評価")
         self.graph_notebook.add(self.disc_diff_graph_tab, text="石数差")
+        self.graph_notebook.add(self.eval_boundary_tab, text="評価境界")
 
         # グラフキャンバス（0..60 の横軸を固定）
         self.eval_canvas = tk.Canvas(self.eval_graph_tab, height=240, bg="white",
@@ -283,6 +285,19 @@ class ChatWindow(tk.Tk):
         self.disc_diff_canvas = tk.Canvas(self.disc_diff_graph_tab, height=240, bg="white",
                                           highlightthickness=1, highlightbackground="#cccccc")
         self.disc_diff_canvas.pack(fill="both", expand=True)
+
+        self.eval_boundary_text = tk.Text(
+            self.eval_boundary_tab,
+            height=10,
+            wrap="word",
+            bg="white",
+            relief="solid",
+            borderwidth=1,
+            padx=10,
+            pady=10,
+        )
+        self.eval_boundary_text.pack(fill="both", expand=True)
+        self.eval_boundary_text.configure(state="disabled")
 
         # リサイズ時に再描画
         self.eval_canvas.bind("<Configure>", lambda e: self._redraw_eval_graph())
@@ -613,6 +628,35 @@ class ChatWindow(tk.Tk):
     def add_turn_disc_diff_point(self, move_no: int, disc_diff: int | None):
         """１ターンが締まった直後に呼ぶ糖衣。"""
         self.add_disc_diff_point(move_no, disc_diff, is_turn_end=True)
+
+    def update_eval_boundaries(self, summary: dict[str, Any] | None):
+        try:
+            if not hasattr(self, "eval_boundary_text"):
+                return
+
+            summary = summary or {}
+            count = int(summary.get("count") or 0)
+            boundaries = summary.get("boundaries")
+            labels = summary.get("labels") or ["とても悪い", "悪い", "普通", "良い", "とても良い"]
+
+            lines = [f"保存済み評価値数：{count}"]
+            if not boundaries or len(boundaries) != 4:
+                lines.append("")
+                lines.append("境界値：データ不足（5件以上で表示）")
+            else:
+                lines.append("")
+                lines.append("5分割の境界値：")
+                for i, value in enumerate(boundaries):
+                    left = labels[i] if i < len(labels) else ""
+                    right = labels[i + 1] if i + 1 < len(labels) else ""
+                    lines.append(f"{left} / {right} 境界：{float(value):+.2f}")
+
+            self.eval_boundary_text.configure(state="normal")
+            self.eval_boundary_text.delete("1.0", "end")
+            self.eval_boundary_text.insert("1.0", "\n".join(lines))
+            self.eval_boundary_text.configure(state="disabled")
+        except Exception:
+            pass
     
     def add_turn_segment(self, start_move_no: int, end_move_no: int):
         try:

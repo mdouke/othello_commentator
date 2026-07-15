@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 from ollama import Client
 from othello_commentator.domain.board_state import count_bw
 from othello_commentator.llm.client_interface import LLMClient, DeltaCallback
+from othello_commentator.storage.eval_history_store import eval_history_store
 
 MODEL_NAME = "gpt-oss:120b-cloud"
 
@@ -71,17 +72,177 @@ def _stone_count_change_lines(pre_view: dict, post_view: dict) -> list[str]:
     except Exception:
         return []
 
-    diff = int(post_b) - int(post_w)
-    if diff > 0:
-        diff_text = f"黒が白より{diff}枚多くなった"
-    elif diff < 0:
-        diff_text = f"白が黒より{abs(diff)}枚多くなった"
+    pre_diff = int(pre_b) - int(pre_w)
+    post_diff = int(post_b) - int(post_w)
+    if post_diff == 0:
+        status = "同じになった"
+    elif pre_diff != 0 and (pre_diff > 0) != (post_diff > 0):
+        status = "逆転した"
+    elif abs(post_diff) < abs(pre_diff):
+        status = "差が縮まった"
+    elif abs(post_diff) > abs(pre_diff):
+        status = "差が広がった"
     else:
-        diff_text = "黒と白が同じ枚数になった"
+        status = "差は変わらなかった"
 
     return [
-        f"黒{pre_b}白{pre_w}から黒{post_b}白{post_w}になった",
-        f"石の数は、{diff_text}",
+        f"石数変化：黒{pre_b}白{pre_w}から黒{post_b}白{post_w}に変化",
+        f"石数の状況：{status}",
+    ]
+
+
+def _board_edge_corner_lines(post_view: dict) -> list[str]:
+    board = post_view.get("board")
+    if not board:
+        return []
+
+    try:
+        corner_coords = {(0, 0), (7, 0), (0, 7), (7, 7)}
+        edge_b = edge_w = corner_b = corner_w = 0
+        for y in range(8):
+            for x in range(8):
+                cell = board[y][x]
+                if (x, y) in corner_coords:
+                    if cell == "B":
+                        corner_b += 1
+                    elif cell == "W":
+                        corner_w += 1
+                elif x in (0, 7) or y in (0, 7):
+                    if cell == "B":
+                        edge_b += 1
+                    elif cell == "W":
+                        edge_w += 1
+    except Exception:
+        return []
+
+    if corner_b + corner_w > 0:
+        return [f"角の石数：黒{corner_b}白{corner_w}"]
+    if edge_b + edge_w > 0:
+        return [f"端の石数：黒{edge_b}白{edge_w}"]
+    return []
+
+
+def _coord_to_xy(move: str) -> tuple[int, int] | None:
+    move = (move or "").lower().strip()
+    if len(move) != 2:
+        return None
+
+    file_ch, rank_ch = move[0], move[1]
+    if file_ch < "a" or file_ch > "h" or rank_ch < "1" or rank_ch > "8":
+        return None
+
+    return ord(file_ch) - ord("a"), int(rank_ch) - 1
+
+
+def _move_position_label(move: str) -> str | None:
+    coord = _coord_to_xy(move)
+    if coord is None:
+        return None
+
+    x, y = coord
+    if x in (0, 7) and y in (0, 7):
+        return "角"
+    if x in (0, 7) or y in (0, 7):
+        return "端"
+    return None
+
+
+def _played_move_coord_line(move: str) -> str:
+    position_label = _move_position_label(move)
+    suffix = f"（{position_label}）" if position_label else ""
+    return f"打たれた手の座標：{move}{suffix}"
+
+
+def _flipped_direction_lines(pre_view: dict, played_move: str) -> list[str]:
+    board = pre_view.get("board")
+    player = (pre_view.get("turn") or "").upper().strip()
+    coord = _coord_to_xy(played_move)
+    if not board or player not in ("B", "W") or coord is None:
+        return []
+
+    x0, y0 = coord
+    opponent = "W" if player == "B" else "B"
+    direction_labels: list[str] = []
+    direction_specs = [
+        ("斜め", -1, -1),
+        ("縦", 0, -1),
+        ("斜め", 1, -1),
+        ("横", -1, 0),
+        ("横", 1, 0),
+        ("斜め", -1, 1),
+        ("縦", 0, 1),
+        ("斜め", 1, 1),
+    ]
+
+    for label, dx, dy in direction_specs:
+        x, y = x0 + dx, y0 + dy
+        seen_opponent = False
+        while 0 <= x < 8 and 0 <= y < 8 and board[y][x] == opponent:
+            seen_opponent = True
+            x += dx
+            y += dy
+
+        if seen_opponent and 0 <= x < 8 and 0 <= y < 8 and board[y][x] == player:
+            if label not in direction_labels:
+                direction_labels.append(label)
+
+    if not direction_labels:
+        return []
+
+    return [f"ひっくり返した方向：{'、'.join(direction_labels)}"]
+
+
+def _played_move_eval_lines(moves: list[str], evals: dict, played_move: str) -> list[str]:
+    played_move = (played_move or "").lower().strip()
+    ordered_moves = []
+    for move in [played_move, *moves]:
+        move = (move or "").lower().strip()
+        if move and move not in ordered_moves:
+            ordered_moves.append(move)
+
+    candidates: list[tuple[str, float, Any]] = []
+    for move in ordered_moves:
+        raw_eval = evals.get(move)
+        if raw_eval is None:
+            continue
+        try:
+            score = float(raw_eval)
+        except (TypeError, ValueError):
+            continue
+        candidates.append((move, score, raw_eval))
+
+    played_raw = evals.get(played_move)
+    played_eval_label = eval_history_store.classify(played_raw)
+    if not candidates:
+        return [
+            f"打たれた手の絶対評価：{played_eval_label}",
+            "その手番で打てた手の順位：順位不明",
+        ]
+
+    score_to_moves: dict[float, list[str]] = {}
+    for move, score, raw_eval in candidates:
+        score_to_moves.setdefault(score, []).append(move)
+
+    ranked_scores = sorted(score_to_moves.keys(), reverse=True)
+    if played_raw is not None:
+        try:
+            played_score = float(played_raw)
+        except (TypeError, ValueError):
+            played_score = None
+    else:
+        played_score = None
+
+    if played_score in score_to_moves:
+        rank = ranked_scores.index(played_score) + 1
+        tied = len(score_to_moves[played_score]) >= 2
+        total_moves = len(ordered_moves) or len(candidates)
+        rank_text = f"{total_moves}手中{'同率' if tied else ''}{rank}位"
+    else:
+        rank_text = "順位不明"
+
+    return [
+        f"打たれた手の絶対評価：{played_eval_label}",
+        f"その手番で打てた手の順位：（{rank_text}）",
     ]
 
 
@@ -129,12 +290,6 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
     pre_evals = pre_view.get("evals") or {}
 
     core_move = played
-    played_eval = pre_evals.get(core_move)
-    played_eval_txt = str(played_eval) if played_eval is not None else "（なし）"
-
-    others = [m for m in pre_moves if m != core_move]
-    others_lines = [f"{m} : {pre_evals.get(m)}" for m in others]
-    others_txt = "\n".join(others_lines) if others_lines else "（なし）"
 
     if phase == "序盤":
         policy = "形勢を断定せず、構想・狙い・今後の展開への期待を語る。"
@@ -144,10 +299,17 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
         policy = "勝敗への緊張感を強め、決着に近づく迫力を込めて語る。"
 
     move_info_lines = [
-        f"{turn_jp}は{core_move}に置いた",
+        f"手番：{turn_jp}",
+        _played_move_coord_line(core_move),
+        *_played_move_eval_lines(pre_moves, pre_evals, core_move),
+        *_flipped_direction_lines(pre_view, core_move),
         *_stone_count_change_lines(pre_view, post_view),
     ]
     move_info_text = "\n".join(f"- {line}" for line in move_info_lines)
+    board_info_lines = _board_edge_corner_lines(post_view)
+    board_info_text = "\n".join(f"- {line}" for line in board_info_lines) if board_info_lines else "- （なし）"
+
+    eval_history_store.append_evals(pre_evals)
 
     return f"""あなたはオセロ対局を盛り上げる実況者です.
 感情的だが、序盤では大げさに断定しすぎないでください。
@@ -155,10 +317,11 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
 出力条件：
 - 必ず1行
 - 形式は {core_move} : "コメント"
-- コメント本文は40文字前後
-- 座標、評価値を本文に含めない
+- コメント本文は40文字前後、最大50文字まで
+- 手の情報は参考情報。全項目を盛り込まなくてよい
+- 実況では最も重要な要素を1〜2個だけ選ぶ
+- 座標、評価値、石数をすべて入れようとしない
 - 石数や石数差の数字は、実況として自然な場合のみ本文に含めてよい
-- Markdown禁止
 - 説明口調ではなく実況のリアクションにする
 
 局面段階：{phase}
@@ -167,10 +330,8 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
 手の情報：
 {move_info_text}
 
-評価比較：
-{core_move}（評価値：{played_eval_txt}）
-他に打てた手
-{others_txt}
+盤面の情報：
+{board_info_text}
 """
 
 

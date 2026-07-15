@@ -8,6 +8,7 @@ from othello_commentator.storage.ollama_comment_store import append_post as olla
 from othello_commentator.llm.comment_parser import parse_comment_for_move
 from othello_commentator.app.session_state import RuntimeState
 from othello_commentator.domain.board_state import FlipState, transform_state
+from othello_commentator.storage.eval_history_store import eval_history_store
 
 
 class CommentaryService:
@@ -148,6 +149,9 @@ class CommentaryService:
                     self.app.append_log,
                     f"[post][warn] provider '{provider}' has no build_prompt_post_move; fallback used",
                 )
+
+            if hasattr(self.app, "update_eval_boundaries"):
+                self.app.after(0, self.app.update_eval_boundaries, eval_history_store.summary())
 
             self.app.after(0, self.app.add_chat_prompt, provider, prompt)
 

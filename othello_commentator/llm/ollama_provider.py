@@ -3,29 +3,127 @@
 from __future__ import annotations
 
 import os
+import math
 from typing import List, Dict, Any
 from ollama import Client
 from othello_commentator.llm.client_interface import LLMClient, DeltaCallback
 
 MODEL_NAME = "gpt-oss:120b-cloud"
 
-def _ascii_board_with_E(board_2d, legal_moves_coords: list[str] | None = None) -> str:
-    # board_2d は 8x8 の ['.','B','W']
-    E = set(m.lower() for m in (legal_moves_coords or []))
-    files = "abcdefgh"
-    lines = []
-    lines.append("/ a b c d e f g h")
-    for y in range(8):
-        rank = str(y + 1)
-        row = []
-        for x in range(8):
-            coord_str = files[x] + rank
-            if coord_str in E and board_2d[y][x] == ".":
-                row.append("E")
-            else:
-                row.append(board_2d[y][x])
-        lines.append(f"{rank} " + " ".join(row))
-    return "\n".join(lines)
+
+def _count_stones(board: list[list[str]]) -> tuple[int, int]:
+    black = sum(cell == "B" for row in board for cell in row)
+    white = sum(cell == "W" for row in board for cell in row)
+    return black, white
+
+
+def _sorted_move_evals(moves: list[str], evals: dict, played_move: str) -> str:
+    """候補手を重複なく、数値評価の高い順（評価なしは末尾）に整形する。"""
+    unique_moves = list(dict.fromkeys(move.lower() for move in moves if move))
+    played = (played_move or "").lower().strip()
+
+    def sort_key(move: str) -> tuple[int, float]:
+        value = evals.get(move)
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return 1, 0.0
+        if not math.isfinite(numeric_value):
+            return 1, 0.0
+        return 0, -numeric_value
+
+    sorted_moves = sorted(unique_moves, key=sort_key)
+    lines = [
+        f"{move} （打たれた手）: {evals.get(move)}"
+        if move == played
+        else f"{move} : {evals.get(move)}"
+        for move in sorted_moves
+    ]
+    return "\n".join(lines) if lines else "（なし）"
+
+
+def _build_move_info(pre_view: dict, post_view: dict, played_move: str) -> str:
+    """盤面をプロンプトへ載せず、着手による変化だけを要約する。"""
+    pre_board = pre_view.get("board")
+    post_board = post_view.get("board")
+    played = (played_move or "").lower().strip()
+    position_eval = pre_view.get("pos_eval")
+    position_eval_txt = str(position_eval) if position_eval is not None else "（なし）"
+
+    if not (
+        isinstance(pre_board, list)
+        and isinstance(post_board, list)
+        and len(pre_board) == 8
+        and len(post_board) == 8
+        and all(isinstance(row, list) and len(row) == 8 for row in pre_board)
+        and all(isinstance(row, list) and len(row) == 8 for row in post_board)
+        and len(played) == 2
+        and played[0] in "abcdefgh"
+        and played[1] in "12345678"
+    ):
+        return (
+            "## 手の情報\n\n"
+            f"- 着手前の盤面評価値（手番側視点）：{position_eval_txt}\n"
+            "- ひっくり返した方向：不明\n"
+            "- 石数変化：不明\n"
+            "- 石数の状況：不明"
+        )
+
+    move_x = ord(played[0]) - ord("a")
+    move_y = int(played[1]) - 1
+    mover = (pre_view.get("turn") or "").upper()
+    opponent = "W" if mover == "B" else "B"
+    direction_kinds: set[str] = set()
+
+    if mover in ("B", "W"):
+        for y in range(8):
+            for x in range(8):
+                if pre_board[y][x] != opponent or post_board[y][x] != mover:
+                    continue
+                dx, dy = x - move_x, y - move_y
+                if dy == 0:
+                    direction_kinds.add("横")
+                elif dx == 0:
+                    direction_kinds.add("縦")
+                elif abs(dx) == abs(dy):
+                    direction_kinds.add("斜め")
+
+    direction_order = ("横", "縦", "斜め")
+    directions = "・".join(item for item in direction_order if item in direction_kinds) or "不明"
+
+    if played in {"a1", "a8", "h1", "h8"}:
+        position_info = "- 着手位置：角\n"
+    elif move_x in (0, 7) or move_y in (0, 7):
+        position_info = "- 着手位置：端\n"
+    else:
+        position_info = ""
+
+    pre_black, pre_white = _count_stones(pre_board)
+    post_black, post_white = _count_stones(post_board)
+    pre_balance = pre_black - pre_white
+    post_balance = post_black - post_white
+    pre_gap = abs(pre_black - pre_white)
+    post_gap = abs(post_black - post_white)
+    if pre_balance != 0 and post_balance == 0:
+        gap_change = "同点になった"
+    elif pre_balance * post_balance < 0:
+        gap_change = "逆転した"
+    elif post_gap > pre_gap:
+        gap_change = "差がひろがった"
+    elif post_gap < pre_gap:
+        gap_change = "差が縮まった"
+    else:
+        gap_change = "差は変わらない"
+
+    return (
+        "## 手の情報\n\n"
+        f"- 着手前の盤面評価値（手番側視点）：{position_eval_txt}\n"
+        f"{position_info}"
+        f"- ひっくり返した方向：{directions}\n"
+        f"- 石数変化：黒{pre_black}白{pre_white}から黒{post_black}白{post_white}に変化\n"
+        f"- 石数の状況：{gap_change}"
+    )
+
 
 def _phase_and_stance(pre_view: dict) -> tuple[str, str, int, str, str]:
     """共通：進行度（phase/stance）と手番表記を作る"""
@@ -61,35 +159,31 @@ def _phase_and_stance(pre_view: dict) -> tuple[str, str, int, str, str]:
 def _common_post_prompt(
     head: str,
     stance: str,
-    pre_ascii: str,
-    post_ascii: str,
+    move_info: str,
     others_txt: str,
     output_key: str,
 ) -> str:
     """共通：プロンプト本文を組み立て"""
     return f"""{head}
 
-局面の進行度
+## 局面の進行度
+
 1〜20手目を序盤、21〜40手目を中盤、41〜60手目を終盤とみなします。
 {stance}
 
-ASCII形式での表示方法
-. : 何もないマス
-B : 黒のコマがおかれているマス
-W : 白のコマがおかれているマス
-E : 手番側の合法手
+{move_info}
 
-盤面（打たれた前）
-{pre_ascii}
+## 打てた手とその評価値（この評価値の具体的な値は回答に含めないでください）
 
-盤面（打たれた後）
-{post_ascii}
-
-他に打てた手とその評価値（この評価値の具体的な値は回答に含めないでください）
+```text
 {others_txt}
+```
 
-出力形式(必ず1行のみ)
+## 出力形式(必ず1行のみ)
+
+```text
 {output_key} : ""
+```
 """
 
 
@@ -98,8 +192,6 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
     phase, stance, next_move_no, turn, turn_jp = _phase_and_stance(pre_view)
 
     played = played_move.lower()
-    pre_board = pre_view.get("board")
-    post_board = post_view.get("board")
     pre_moves = [m.lower() for m in (pre_view.get("moves") or [])]
     pre_evals = pre_view.get("evals") or {}
 
@@ -107,15 +199,11 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
     played_eval = pre_evals.get(core_move)
     played_eval_txt = str(played_eval) if played_eval is not None else "（なし）"
 
-    others = [m for m in pre_moves if m != core_move]
-    others_lines = [f"{m} : {pre_evals.get(m)}" for m in others]
-    others_txt = "\n".join(others_lines) if others_lines else "（なし）"
-
-    pre_ascii = _ascii_board_with_E(pre_board, pre_moves) if pre_board else ""
-    post_ascii = _ascii_board_with_E(post_board, []) if post_board else ""
+    others_txt = _sorted_move_evals([core_move, *pre_moves], pre_evals, core_move)
+    move_info = _build_move_info(pre_view, post_view, played)
 
     head = (
-        f"オセロをしていて{turn_jp}が{core_move}（評価値：{played_eval_txt}）に手を打って盤面が以下のように変わりました。"
+        f"オセロをしていて{turn_jp}が{core_move}（評価値：{played_eval_txt}）に手を打ちました。"
         f"この手が他に打てた手と比べて良かったのか悪かったのかニュアンスに含めながら、感情的な実況者のようなリアクションを生成してください。"
         f"また局面の進行度（序盤/中盤/終盤）を考慮した上で、出力形式に合わせて40文字程度になるようにしてください。"
     )
@@ -123,8 +211,7 @@ def build_post_move_prompt_normal(pre_view: dict, post_view: dict, played_move: 
     return _common_post_prompt(
         head=head,
         stance=stance,
-        pre_ascii=pre_ascii,
-        post_ascii=post_ascii,
+        move_info=move_info,
         others_txt=others_txt,
         output_key=played,  # 通常は "d6" など
     )
@@ -138,8 +225,6 @@ def build_post_move_prompt_pass(pre_view: dict, post_view: dict) -> str:
     if phase == "序盤":
         stance = f"次はおよそ{next_move_no}手目の序盤。断定しすぎず、構想と期待感を中心に実況。"
 
-    pre_board = pre_view.get("board")
-    post_board = post_view.get("board")
     pre_moves = [m.lower() for m in (pre_view.get("moves") or [])]
     pre_evals = pre_view.get("evals") or {}
 
@@ -167,12 +252,7 @@ def build_post_move_prompt_pass(pre_view: dict, post_view: dict) -> str:
     played_eval = pre_evals.get(core_move)
     played_eval_txt = str(played_eval) if played_eval is not None else "（なし）"
 
-    others = [m for m in pre_moves if m != core_move]
-    others_lines = [f"{m} : {pre_evals.get(m)}" for m in others]
-    others_txt = "\n".join(others_lines) if others_lines else "（なし）"
-
-    pre_ascii = _ascii_board_with_E(pre_board, pre_moves) if pre_board else ""
-    post_ascii = _ascii_board_with_E(post_board, []) if post_board else ""
+    others_txt = _sorted_move_evals([core_move, *pre_moves], pre_evals, core_move)
 
     # 事実の2行（黒/白どちらでも動く）
     pass_intro = (
@@ -186,18 +266,22 @@ def build_post_move_prompt_pass(pre_view: dict, post_view: dict) -> str:
 
     head = f"""{pass_intro}
 
-【必須（コメント内に必ず入れる）】
+## 必須（コメント内に必ず入れる）
+
 - {must_pass} の明示（同じ意味なら言い換え可）
 - {must_gain} の明示（同じ意味なら言い換え可）
 
-【狙い】
+## 狙い
+
 原因手（{core_move}）が他候補と比べて最善かはニュアンスで触れてください。
 ただし「{_jp(passed_side)}をパスに追い込み、{_jp(gain_side)}が連続手番で主導権を取った」意味合いは必ず入れてください（表現は任せます）。
 
-【文字数】
+## 文字数
+
 70文字前後
 
-【出力ルール】
+## 出力ルール
+
 - 出力は必ず1行のみ
 - 形式は厳守：pass : "..."
 - 必須2点が欠けたら作り直し"""
@@ -205,8 +289,7 @@ def build_post_move_prompt_pass(pre_view: dict, post_view: dict) -> str:
     return _common_post_prompt(
         head=head,
         stance=stance,
-        pre_ascii=pre_ascii,
-        post_ascii=post_ascii,
+        move_info="",
         others_txt=others_txt,
         output_key="pass",
     )
@@ -261,22 +344,24 @@ def build_prompt_end_game(
             played_eval_txt = str(evals.get(core_move))
 
     # スタイル（将来拡張用）：今回は文面は固定で、最後に口調ヒントだけ軽く付ける
-    style_hint = f"\n\n【口調】\n- {style}" if style else ""
+    style_hint = f"\n\n## 口調\n\n- {style}" if style else ""
 
     prompt = f"""あなたは感情的なオセロ実況者です。{turn_jp}が{core_move}（評価値：{played_eval_txt}）に手を打って終局しました。黒と白の最終的なコマ数と勝者を明示する感情的なコメントお願いします。。
 
-【終局情報】
- 終局理由：{reason_txt}の明示（同じ意味で可能な限り言い換える）
- 勝者：{winner}の明示（引き分けの場合は「引き分け」）
- 黒のコマ数：{black}の明示
- 白のコマ数：{white}の明示
+## 終局情報
 
- 【出力形式】
- - 1行のみ、必ずこの形：
-   __end__: <本文>
- - 本文は合計80字前後
- - 盤面の具体（角、辺、手順、どこに置いた等）は言わない。根拠のない分析は禁止。
- - 代わりに抽象的に盛り上げる（「粘り勝ち」「逃げ切り」「最後まで拮抗」など）{style_hint}
+- 終局理由：{reason_txt}の明示（同じ意味で可能な限り言い換える）
+- 勝者：{winner}の明示（引き分けの場合は「引き分け」）
+- 黒のコマ数：{black}の明示
+- 白のコマ数：{white}の明示
+
+## 出力形式
+
+- 1行のみ、必ずこの形：
+  `__end__: <本文>`
+- 本文は合計80字前後
+- 盤面の具体（角、辺、手順、どこに置いた等）は言わない。根拠のない分析は禁止。
+- 代わりに抽象的に盛り上げる（「粘り勝ち」「逃げ切り」「最後まで拮抗」など）{style_hint}
 """
     # 将来のための置換（今回テンプレに<<STYLE>>は無いが一応）
     return prompt.replace("<<STYLE>>", style)
@@ -318,6 +403,7 @@ class OllamaClient(LLMClient):
         stream = self.client.chat(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
+            think='low',
             options={"temperature": 0.2},
             stream=True,
         )

@@ -4,7 +4,10 @@ import threading
 import time
 from typing import Any, Callable
 
-from othello_commentator.storage.ollama_comment_store import append_post as ollama_append_post
+from othello_commentator.storage.ollama_comment_store import (
+    append_post as ollama_append_post,
+    elapsed_since_start,
+)
 from othello_commentator.llm.comment_parser import parse_comment_for_move
 from othello_commentator.app.session_state import RuntimeState
 from othello_commentator.domain.board_state import FlipState, transform_state
@@ -129,6 +132,23 @@ class CommentaryService:
             if runtime_state.last_post_key == post_key:
                 return
             runtime_state.last_post_key = post_key
+            move_elapsed_sec = elapsed_since_start()
+
+            evaluated_move = last_move
+            if last_move == "pass":
+                evaluated_move = (post_view.get("cause_move") or "").lower().strip()
+            pre_evals = pre_view.get("evals") or {}
+            normalized_evals = (
+                {str(move).lower(): value for move, value in pre_evals.items()}
+                if isinstance(pre_evals, dict)
+                else {}
+            )
+            played_move_eval = normalized_evals.get(evaluated_move)
+            alternative_move_evals = {
+                move: value
+                for move, value in normalized_evals.items()
+                if move != evaluated_move
+            }
 
             provider = self.app.current_provider()
             style = self.app.current_style()
@@ -166,19 +186,7 @@ class CommentaryService:
                         self.tk_call(self.front.on_tts_prepare)
                     self.tk_call(self.front.on_request_end, True, elapsed, None)
 
-                    if provider == "GPT-OSS 120B Cloud":
-                        try:
-                            ollama_append_post(
-                                move_no=post_view.get("move_no"),
-                                move=last_move,
-                                turn=post_view.get("turn"),
-                                elapsed_sec=elapsed,
-                                comment=comment,
-                                raw_text=full,
-                            )
-                        except Exception as exc:
-                            self.app.after(0, self.app.append_log, f"[post][warn] ollama_append_post failed: {exc}")
-
+                    playback_end_elapsed_sec = None
                     if comment:
                         try:
                             self.tk_call(self.front.on_tts_start, comment)
@@ -187,8 +195,25 @@ class CommentaryService:
                             self.app.after(0, self.app.append_log, f"[post][warn] speak failed: {exc}")
                         finally:
                             self.tk_call(self.front.on_tts_end)
+                            playback_end_elapsed_sec = elapsed_since_start()
                     else:
                         self.app.after(0, self.app.append_log, f"[post][warn] no comment parsed for {last_move}")
+
+                    if provider == "GPT-OSS 120B Cloud":
+                        try:
+                            ollama_append_post(
+                                move_no=post_view.get("move_no"),
+                                move=last_move,
+                                turn=post_view.get("turn"),
+                                elapsed_sec=elapsed,
+                                move_elapsed_sec=move_elapsed_sec,
+                                playback_end_elapsed_sec=playback_end_elapsed_sec,
+                                played_move_eval=played_move_eval,
+                                alternative_move_evals=alternative_move_evals,
+                                comment=comment,
+                            )
+                        except Exception as exc:
+                            self.app.after(0, self.app.append_log, f"[post][warn] ollama_append_post failed: {exc}")
 
                     self.app.after(0, self.app.append_log, f"[post] {last_move} ({provider}) {elapsed:.2f}s")
                 except Exception as exc:

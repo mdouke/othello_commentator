@@ -17,6 +17,7 @@ from othello_commentator.app.state_service import StateProcessor
 from othello_commentator.domain.board_state import FlipState, transform_state
 from othello_commentator.audio.tts import build_speaker
 from othello_commentator.app.feedback_coordinator import UiFeedbackCoordinator
+from othello_commentator.storage.ollama_comment_store import reset_start_time
 
 
 @dataclass
@@ -101,6 +102,7 @@ def bootstrap_application(script_path: Path, logger: logging.Logger) -> Bootstra
     )
 
     def on_start():
+        reset_start_time()
         turn = app.get_start_turn() if hasattr(app, "get_start_turn") else "B"
         send(f"START:TURN={turn}")
         ui_feedback.append_system_log("START sent")

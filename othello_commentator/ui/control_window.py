@@ -19,6 +19,7 @@ class ChatWindow(tk.Tk):
         self._on_depth_change: Optional[Callable[[int], None]] = None
         self.on_calib = None
         self._on_turn_change: Optional[Callable[[str], None]] = None
+        self._on_microphone_refresh: Optional[Callable[[], None]] = None
         # ★履歴選択UI用
         self._on_pick_snapshot: Optional[Callable[[int], None]] = None
         self._on_calib: Optional[Callable[[bool], None]] = None  # True=CALIB ON, False=CALIB OFF
@@ -35,6 +36,8 @@ class ChatWindow(tk.Tk):
         self.flip_v_var = tk.BooleanVar(value=True)  # 上下
 
         self.depth_var = tk.IntVar(value=2)  # 探索深さ
+        self.microphone_var = tk.StringVar(value="")
+        self._microphone_choices: dict[str, int | None] = {}
 
         # グラフ用データ（(move_no, eval) の配列）
         self.eval_points: list[tuple[int, float]] = []
@@ -178,6 +181,13 @@ class ChatWindow(tk.Tk):
         tk.Label(s, textvariable=self.status_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
+        tk.Label(s, text="マイク:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        self.microphone_combo = ttk.Combobox(s, textvariable=self.microphone_var, state="readonly", width=42)
+        self.microphone_combo.grid(row=row, column=1, columnspan=2, sticky="ew", padx=4, pady=4)
+        self.btn_refresh_microphones = tk.Button(s, text="再読込", command=self._click_microphone_refresh)
+        self.btn_refresh_microphones.grid(row=row, column=3, sticky="w", padx=4, pady=4)
+        row += 1
+
         tk.Label(s, text="LLM:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
         self.provider_combo = ttk.Combobox(
             s, values=self.provider_names, textvariable=self.current_provider_name, state="readonly"
@@ -244,7 +254,7 @@ class ChatWindow(tk.Tk):
         self._apply_calib_ui_state()
         s.grid_rowconfigure(row - 3, weight=1)  # list_frameの行（ざっくり）
 
-        for c in range(3):
+        for c in range(4):
             s.grid_columnconfigure(c, weight=1)
 
         # --- 左 下段：評価履歴（手数, 黒視点評価）
@@ -381,6 +391,37 @@ class ChatWindow(tk.Tk):
     def set_on_send_prompt(self, cb: Callable[[], None]):
         self._on_send_prompt = cb
 
+    def set_on_microphone_refresh(self, cb: Callable[[], None]) -> None:
+        self._on_microphone_refresh = cb
+
+    def set_microphone_devices(self, devices: list[tuple[int, str, bool]]) -> None:
+        if not hasattr(self, "microphone_combo"):
+            return
+
+        choices: dict[str, int | None] = {"既定のマイク": None}
+        labels = ["既定のマイク"]
+        for index, name, is_default in devices:
+            suffix = " (既定)" if is_default else ""
+            label = f"{index}: {name}{suffix}"
+            choices[label] = index
+            labels.append(label)
+
+        current = self.microphone_var.get()
+        self._microphone_choices = choices
+        self.microphone_combo.configure(values=labels, state="readonly")
+        self.microphone_var.set(current if current in choices else labels[0])
+
+    def set_microphone_error(self, message: str) -> None:
+        if not hasattr(self, "microphone_combo"):
+            return
+        self._microphone_choices = {"既定のマイク": None}
+        self.microphone_combo.configure(values=["既定のマイク"], state="disabled")
+        self.microphone_var.set("既定のマイク")
+        self.append_log(f"[ui] マイク一覧を取得できません: {message}")
+
+    def get_selected_microphone_device(self) -> int | None:
+        return self._microphone_choices.get(self.microphone_var.get())
+
     # --- 内部イベント ---
     def _click_start(self):
         if self._on_start:
@@ -389,6 +430,10 @@ class ChatWindow(tk.Tk):
     def _click_hand(self, on: bool):
         if self._on_hand:
             self._on_hand(on)
+
+    def _click_microphone_refresh(self):
+        if self._on_microphone_refresh:
+            self._on_microphone_refresh()
     
     def _apply_calib_ui_state(self) -> None:
         """キャリブ中は再開系の操作を事故防止のため無効化する。"""

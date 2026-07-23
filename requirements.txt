@@ -3,6 +3,7 @@ numpy
 opencv-python
 Pillow
 python-dotenv
+sounddevice
 
 # LLM providers
 openai

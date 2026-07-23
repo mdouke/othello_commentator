@@ -17,6 +17,7 @@ from othello_commentator.app.state_service import StateProcessor
 from othello_commentator.domain.board_state import FlipState, transform_state
 from othello_commentator.audio.tts import build_speaker
 from othello_commentator.app.feedback_coordinator import UiFeedbackCoordinator
+from othello_commentator.storage.audio_recorder import MicrophoneRecorder
 from othello_commentator.storage.ollama_comment_store import reset_start_time
 
 
@@ -90,6 +91,23 @@ def bootstrap_application(script_path: Path, logger: logging.Logger) -> Bootstra
         flip_state=flip_state,
         logger=logger,
     )
+    audio_recorder = MicrophoneRecorder(script_path.parents[2] / "logs" / "audio")
+
+    def refresh_microphones() -> None:
+        try:
+            devices = audio_recorder.list_input_devices()
+            if hasattr(app, "set_microphone_devices"):
+                app.set_microphone_devices(
+                    [
+                        (device.index, device.name, device.is_default)
+                        for device in devices
+                    ]
+                )
+        except Exception as exc:
+            if hasattr(app, "set_microphone_error"):
+                app.set_microphone_error(str(exc))
+            logger.warning(f"microphone device list unavailable: {exc}")
+
     message_router = MessageRouter(
         resume_manager=resume_manager,
         state_processor=state_processor,
@@ -103,6 +121,15 @@ def bootstrap_application(script_path: Path, logger: logging.Logger) -> Bootstra
 
     def on_start():
         reset_start_time()
+        if not ui_state.prompt_gate_open:
+            try:
+                if hasattr(app, "get_selected_microphone_device"):
+                    audio_recorder.device = app.get_selected_microphone_device()
+                audio_path = audio_recorder.start()
+                ui_feedback.append_system_log(f"audio recording started: {audio_path}")
+            except RuntimeError as exc:
+                ui_feedback.append_system_log(f"audio recording unavailable: {exc}")
+                logger.warning(f"audio recording unavailable: {exc}")
         turn = app.get_start_turn() if hasattr(app, "get_start_turn") else "B"
         send(f"START:TURN={turn}")
         ui_feedback.append_system_log("START sent")
@@ -148,6 +175,10 @@ def bootstrap_application(script_path: Path, logger: logging.Logger) -> Bootstra
 
     def on_close():
         try:
+            audio_recorder.stop()
+        except RuntimeError as exc:
+            logger.warning(f"failed to stop audio recording: {exc}")
+        try:
             ipc_client.terminate()
         except Exception:
             pass
@@ -157,6 +188,9 @@ def bootstrap_application(script_path: Path, logger: logging.Logger) -> Bootstra
         app.set_on_pick_snapshot(resume_manager.on_pick_snapshot)
     if hasattr(app, "set_on_calib"):
         app.set_on_calib(resume_manager.on_calib)
+    if hasattr(app, "set_on_microphone_refresh"):
+        app.set_on_microphone_refresh(refresh_microphones)
+    refresh_microphones()
     app.set_on_start(on_start)
     if hasattr(app, "set_on_hand"):
         app.set_on_hand(resume_manager.on_hand)

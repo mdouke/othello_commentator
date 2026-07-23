@@ -44,6 +44,8 @@ class CommentaryService:
             pre_view = runtime_state.pre_snapshot_view or {}
             raw_latest = runtime_state.latest_raw or {}
             post_view = transform_state(raw_latest, flip_state) if isinstance(raw_latest, dict) else {}
+            final_view = runtime_state.final_view or post_view
+            end_elapsed_sec = elapsed_since_start()
 
             provider = self.app.current_provider()
             style = self.app.current_style()
@@ -88,6 +90,7 @@ class CommentaryService:
                         self.tk_call(self.front.on_tts_prepare)
                     self.tk_call(self.front.on_request_end, True, elapsed, None)
 
+                    playback_end_elapsed_sec = None
                     if comment:
                         try:
                             self.tk_call(self.front.on_tts_start, comment)
@@ -96,8 +99,25 @@ class CommentaryService:
                             self.app.after(0, self.app.append_log, f"[end][warn] speak failed: {exc}")
                         finally:
                             self.tk_call(self.front.on_tts_end)
+                            playback_end_elapsed_sec = elapsed_since_start()
                     else:
                         self.app.after(0, self.app.append_log, "[end][warn] no end comment extracted")
+
+                    if provider == "GPT-OSS 120B Cloud":
+                        try:
+                            ollama_append_post(
+                                move_no=final_view.get("move_no"),
+                                move="__end__",
+                                turn=final_view.get("turn"),
+                                elapsed_sec=elapsed,
+                                move_elapsed_sec=end_elapsed_sec,
+                                playback_end_elapsed_sec=playback_end_elapsed_sec,
+                                played_move_eval=None,
+                                alternative_move_evals={},
+                                comment=comment,
+                            )
+                        except Exception as exc:
+                            self.app.after(0, self.app.append_log, f"[end][warn] ollama_append_post failed: {exc}")
 
                     self.app.after(0, self.app.append_log, f"[end] {reason} winner={winner} ({provider}) {elapsed:.2f}s")
                 except Exception as exc:

@@ -18,6 +18,8 @@ def test_append_post_uses_elapsed_time_from_start(monkeypatch, tmp_path):
         playback_end_elapsed_sec=12.0,
         played_move_eval=3.25,
         alternative_move_evals={"c4": 1.5, "f5": -2.0},
+        language="en",
+        provider="GPT-OSS 120B Cloud",
     )
 
     record = json.loads(ollama_comment_store.LOG_PATH.read_text(encoding="utf-8"))
@@ -26,6 +28,8 @@ def test_append_post_uses_elapsed_time_from_start(monkeypatch, tmp_path):
     assert record["playback_end_elapsed_sec"] == 12.0
     assert record["played_move_eval"] == 3.25
     assert record["alternative_move_evals"] == {"c4": 1.5, "f5": -2.0}
+    assert record["language"] == "en"
+    assert record["provider"] == "GPT-OSS 120B Cloud"
     assert "raw_text" not in record
 
 

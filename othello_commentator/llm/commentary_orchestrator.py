@@ -9,6 +9,11 @@ from othello_commentator.storage.ollama_comment_store import (
     elapsed_since_start,
 )
 from othello_commentator.llm.comment_parser import parse_comment_for_move
+from othello_commentator.llm.prompt_builder import (
+    build_end_game_prompt,
+    build_post_move_prompt,
+)
+from othello_commentator.app.commentary_settings import normalize_commentary_language
 from othello_commentator.app.session_state import RuntimeState
 from othello_commentator.domain.board_state import FlipState, transform_state
 
@@ -20,7 +25,7 @@ class CommentaryService:
         app,
         front,
         providers: dict[str, Any],
-        speak: Callable[[str], None],
+        speak: Callable[[str, str], None],
         tk_call: Callable[..., None],
     ) -> None:
         self.app = app
@@ -49,26 +54,19 @@ class CommentaryService:
 
             provider = self.app.current_provider()
             style = self.app.current_style()
+            language = normalize_commentary_language(
+                self.app.current_commentary_language()
+                if hasattr(self.app, "current_commentary_language")
+                else "ja"
+            ).value
             client = self.providers[provider]
-
-            if hasattr(client, "build_prompt_end_game"):
-                prompt = client.build_prompt_end_game(
-                    pre_state=pre_view,
-                    post_state=post_view,
-                    end_info=end_info,
-                    style=style,
-                )
-            else:
-                prompt = (
-                    "あなたは感情的なオセロ実況者です。終局の締めコメントを作ってください。\n"
-                    "【出力】1行のみ：__end__: <本文>\n"
-                    f"reason={reason} winner={winner} black={black} white={white}\n"
-                )
-                self.app.after(
-                    0,
-                    self.app.append_log,
-                    f"[end][warn] provider '{provider}' has no build_prompt_end_game; fallback used",
-                )
+            prompt = build_end_game_prompt(
+                pre_state=pre_view,
+                post_state=post_view,
+                end_info=end_info,
+                style=style,
+                language=language,
+            )
 
             self.app.after(0, self.app.add_chat_prompt, provider, prompt)
 
@@ -94,7 +92,7 @@ class CommentaryService:
                     if comment:
                         try:
                             self.tk_call(self.front.on_tts_start, comment)
-                            self.speak(comment)
+                            self.speak(comment, language)
                         except Exception as exc:
                             self.app.after(0, self.app.append_log, f"[end][warn] speak failed: {exc}")
                         finally:
@@ -115,6 +113,8 @@ class CommentaryService:
                                 played_move_eval=None,
                                 alternative_move_evals={},
                                 comment=comment,
+                                language=language,
+                                provider=provider,
                             )
                         except Exception as exc:
                             self.app.after(0, self.app.append_log, f"[end][warn] ollama_append_post failed: {exc}")
@@ -172,22 +172,19 @@ class CommentaryService:
 
             provider = self.app.current_provider()
             style = self.app.current_style()
+            language = normalize_commentary_language(
+                self.app.current_commentary_language()
+                if hasattr(self.app, "current_commentary_language")
+                else "ja"
+            ).value
             client = self.providers[provider]
-
-            if hasattr(client, "build_prompt_post_move"):
-                prompt = client.build_prompt_post_move(
-                    pre_state=pre_view,
-                    post_state=post_view,
-                    played_move=last_move,
-                    style=style,
-                )
-            else:
-                prompt = client.build_prompt_from_state(dict(post_view)).replace("<<STYLE>>", style)
-                self.app.after(
-                    0,
-                    self.app.append_log,
-                    f"[post][warn] provider '{provider}' has no build_prompt_post_move; fallback used",
-                )
+            prompt = build_post_move_prompt(
+                pre_state=pre_view,
+                post_state=post_view,
+                played_move=last_move,
+                style=style,
+                language=language,
+            )
 
             self.app.after(0, self.app.add_chat_prompt, provider, prompt)
 
@@ -210,7 +207,7 @@ class CommentaryService:
                     if comment:
                         try:
                             self.tk_call(self.front.on_tts_start, comment)
-                            self.speak(comment)
+                            self.speak(comment, language)
                         except Exception as exc:
                             self.app.after(0, self.app.append_log, f"[post][warn] speak failed: {exc}")
                         finally:
@@ -231,6 +228,8 @@ class CommentaryService:
                                 played_move_eval=played_move_eval,
                                 alternative_move_evals=alternative_move_evals,
                                 comment=comment,
+                                language=language,
+                                provider=provider,
                             )
                         except Exception as exc:
                             self.app.after(0, self.app.append_log, f"[post][warn] ollama_append_post failed: {exc}")

@@ -4,6 +4,11 @@ from tkinter import ttk
 from typing import Callable, Optional
 from datetime import datetime
 from othello_commentator.ui.board_widget import BoardPanel
+from othello_commentator.app.commentary_settings import CommentaryLanguage
+
+
+_DEFAULT_STYLE_JA = "感情的な実況者のような"
+_DEFAULT_STYLE_EN = "an energetic and emotional sports commentator"
 
 
 class ChatWindow(tk.Tk):
@@ -27,7 +32,8 @@ class ChatWindow(tk.Tk):
 
         self.provider_names = list(providers.keys())
         self.current_provider_name = tk.StringVar(value=self.provider_names[0])
-        self.style_var = tk.StringVar(value="感情的な実況者のような")
+        self.style_var = tk.StringVar(value=_DEFAULT_STYLE_JA)
+        self.commentary_language_var = tk.StringVar(value="日本語")
 
         # 反転トグル（初期値は必要に応じて True/False に）
         # 追加: __init__ 内でロック状態フラグ
@@ -225,6 +231,20 @@ class ChatWindow(tk.Tk):
             s, values=self.provider_names, textvariable=self.current_provider_name, state="readonly"
         )
         self.provider_combo.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        tk.Label(s, text="実況言語:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        self.commentary_language_combo = ttk.Combobox(
+            s,
+            values=("日本語", "English"),
+            textvariable=self.commentary_language_var,
+            state="readonly",
+            width=16,
+        )
+        self.commentary_language_combo.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        self.commentary_language_combo.bind(
+            "<<ComboboxSelected>>", self._on_commentary_language_changed
+        )
         row += 1
 
         tk.Label(s, text="リアクション文言:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
@@ -464,6 +484,14 @@ class ChatWindow(tk.Tk):
     def get_speech_rate(self) -> int:
         return self._speech_rate
 
+    def _on_commentary_language_changed(self, _event=None) -> None:
+        style = self.style_var.get().strip()
+        if self.current_commentary_language() == CommentaryLanguage.ENGLISH.value:
+            if style in {"", _DEFAULT_STYLE_JA}:
+                self.style_var.set(_DEFAULT_STYLE_EN)
+        elif style in {"", _DEFAULT_STYLE_EN}:
+            self.style_var.set(_DEFAULT_STYLE_JA)
+
     # --- 内部イベント ---
     def _click_start(self):
         if self._on_start:
@@ -608,6 +636,11 @@ class ChatWindow(tk.Tk):
 
     def current_style(self) -> str:
         return self.style_var.get()
+
+    def current_commentary_language(self) -> str:
+        if self.commentary_language_var.get() == "English":
+            return CommentaryLanguage.ENGLISH.value
+        return CommentaryLanguage.JAPANESE.value
 
     # 送信プロンプトを Chat タブに表示
     def add_chat_prompt(self, provider: str, prompt: str) -> None:

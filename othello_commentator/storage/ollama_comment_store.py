@@ -67,6 +67,8 @@ def append_post(
     playback_end_elapsed_sec: float | None = None,
     played_move_eval: float | None = None,
     alternative_move_evals: dict[str, float | None] | None = None,
+    language: str | None = None,
+    provider: str | None = None,
 ):
     """
     着手後実況（post）用 Ollama ログ。
@@ -92,6 +94,10 @@ def append_post(
         float(played_move_eval) if played_move_eval is not None else None
     )
     rec["alternative_move_evals"] = alternative_move_evals or {}
+    if language is not None:
+        rec["language"] = language
+    if provider is not None:
+        rec["provider"] = provider
 
     if elapsed_sec is not None:
         rec["elapsed_sec"] = float(elapsed_sec)

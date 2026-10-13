@@ -8,11 +8,14 @@ import queue
 import subprocess
 import threading
 import logging
-from typing import Optional, Tuple
+from typing import Callable, Tuple
 
 log = logging.getLogger(__name__)
 
-def build_speaker():
+DEFAULT_SPEECH_RATE = 200
+
+
+def build_speaker(rate_provider: Callable[[], int] | None = None):
     """
     OS を判定して共通の speak(text:str)->None を返す。
     - macOS: 'say'
@@ -22,6 +25,14 @@ def build_speaker():
     """
     is_mac = platform.system() == "Darwin"
 
+    def current_rate() -> int:
+        if rate_provider is None:
+            return DEFAULT_SPEECH_RATE
+        try:
+            return max(100, min(300, int(rate_provider())))
+        except (TypeError, ValueError):
+            return DEFAULT_SPEECH_RATE
+
     if is_mac:
         def speak(text: str) -> None:
             t = (text or "").strip()
@@ -29,7 +40,7 @@ def build_speaker():
                 try:
                     # ★完了まで待つ（ブロッキング）
                     subprocess.run(
-                        ["say", "-r", "200", t],
+                        ["say", "-r", str(current_rate()), t],
                         check=False,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
@@ -51,18 +62,19 @@ def build_speaker():
         return speak
 
     # ★(text, done_event) を流して、worker完了で done_event を set する
-    Item = Tuple[str, threading.Event]
+    Item = Tuple[str, int, threading.Event]
     q: queue.Queue[Item | None] = queue.Queue()
     eng = pyttsx3.init()
-    eng.setProperty("rate", 200)
+    eng.setProperty("rate", DEFAULT_SPEECH_RATE)
 
     def _worker() -> None:
         while True:
             t = q.get()
             if t is None:
                 break
-            text, done_event = t
+            text, rate, done_event = t
             try:
+                eng.setProperty("rate", rate)
                 eng.say(text)
                 eng.runAndWait()
             except Exception:
@@ -88,7 +100,7 @@ def build_speaker():
         t = (text or "").strip()
         if t:
             done = threading.Event()
-            q.put((t, done))
+            q.put((t, current_rate(), done))
             # ★完了まで待つ（ブロッキング）
             # 無限待ちが嫌なら timeout=XXX にしてもOK
             done.wait()

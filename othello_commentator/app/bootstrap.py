@@ -31,10 +31,10 @@ class BootstrappedApp:
 
 def bootstrap_application(script_path: Path, logger: logging.Logger) -> BootstrappedApp:
     providers = build_providers()
-    speak = build_speaker()
     ipc_client = RealtimeProcessClient(script_path)
 
     app = ChatWindow(providers)
+    speak = build_speaker(rate_provider=app.get_speech_rate)
     front = FrontWindow(app)
 
     def tk_call(fn, *args):

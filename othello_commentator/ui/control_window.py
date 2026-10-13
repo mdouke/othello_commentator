@@ -36,6 +36,8 @@ class ChatWindow(tk.Tk):
         self.flip_v_var = tk.BooleanVar(value=True)  # 上下
 
         self.depth_var = tk.IntVar(value=2)  # 探索深さ
+        self.speech_rate_var = tk.IntVar(value=200)
+        self._speech_rate = 200
         self.recording_enabled_var = tk.BooleanVar(value=False)
         self.microphone_var = tk.StringVar(value="")
         self._microphone_choices: dict[str, int | None] = {}
@@ -181,6 +183,24 @@ class ChatWindow(tk.Tk):
         tk.Label(s, text="状態:").grid(row=row, column=0, sticky="w", padx=4, pady=4)
         self.status_var = tk.StringVar(value="待機中 ...")
         tk.Label(s, textvariable=self.status_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        tk.Label(s, text="読み上げ速度:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        self.speech_rate_spin = tk.Spinbox(
+            s,
+            from_=100,
+            to=300,
+            increment=10,
+            textvariable=self.speech_rate_var,
+            width=5,
+            command=self._on_speech_rate_changed,
+            state="readonly",
+            justify="center",
+        )
+        self.speech_rate_spin.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        tk.Label(s, text="数値が大きいほど速い").grid(
+            row=row, column=2, sticky="w", padx=4, pady=4
+        )
         row += 1
 
         tk.Label(s, text="録音:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
@@ -441,6 +461,9 @@ class ChatWindow(tk.Tk):
     def is_recording_enabled(self) -> bool:
         return bool(self.recording_enabled_var.get())
 
+    def get_speech_rate(self) -> int:
+        return self._speech_rate
+
     # --- 内部イベント ---
     def _click_start(self):
         if self._on_start:
@@ -456,6 +479,15 @@ class ChatWindow(tk.Tk):
 
     def _recording_enabled_changed(self) -> None:
         self._sync_recording_controls()
+
+    def _on_speech_rate_changed(self) -> None:
+        try:
+            value = int(self.speech_rate_var.get())
+        except (tk.TclError, TypeError, ValueError):
+            value = 200
+        self._speech_rate = max(100, min(300, value))
+        if value != self._speech_rate:
+            self.speech_rate_var.set(self._speech_rate)
 
     def _sync_recording_controls(self) -> None:
         if not hasattr(self, "microphone_combo"):

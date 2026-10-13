@@ -36,8 +36,10 @@ class ChatWindow(tk.Tk):
         self.flip_v_var = tk.BooleanVar(value=True)  # 上下
 
         self.depth_var = tk.IntVar(value=2)  # 探索深さ
+        self.recording_enabled_var = tk.BooleanVar(value=False)
         self.microphone_var = tk.StringVar(value="")
         self._microphone_choices: dict[str, int | None] = {}
+        self._microphone_available = True
 
         # グラフ用データ（(move_no, eval) の配列）
         self.eval_points: list[tuple[int, float]] = []
@@ -179,6 +181,16 @@ class ChatWindow(tk.Tk):
         tk.Label(s, text="状態:").grid(row=row, column=0, sticky="w", padx=4, pady=4)
         self.status_var = tk.StringVar(value="待機中 ...")
         tk.Label(s, textvariable=self.status_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        tk.Label(s, text="録音:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        self.recording_enabled_cb = ttk.Checkbutton(
+            s,
+            text="録音する",
+            variable=self.recording_enabled_var,
+            command=self._recording_enabled_changed,
+        )
+        self.recording_enabled_cb.grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
         tk.Label(s, text="マイク:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
@@ -408,19 +420,26 @@ class ChatWindow(tk.Tk):
 
         current = self.microphone_var.get()
         self._microphone_choices = choices
-        self.microphone_combo.configure(values=labels, state="readonly")
+        self._microphone_available = True
+        self.microphone_combo.configure(values=labels)
         self.microphone_var.set(current if current in choices else labels[0])
+        self._sync_recording_controls()
 
     def set_microphone_error(self, message: str) -> None:
         if not hasattr(self, "microphone_combo"):
             return
         self._microphone_choices = {"既定のマイク": None}
-        self.microphone_combo.configure(values=["既定のマイク"], state="disabled")
+        self._microphone_available = False
+        self.microphone_combo.configure(values=["既定のマイク"])
         self.microphone_var.set("既定のマイク")
+        self._sync_recording_controls()
         self.append_log(f"[ui] マイク一覧を取得できません: {message}")
 
     def get_selected_microphone_device(self) -> int | None:
         return self._microphone_choices.get(self.microphone_var.get())
+
+    def is_recording_enabled(self) -> bool:
+        return bool(self.recording_enabled_var.get())
 
     # --- 内部イベント ---
     def _click_start(self):
@@ -434,6 +453,17 @@ class ChatWindow(tk.Tk):
     def _click_microphone_refresh(self):
         if self._on_microphone_refresh:
             self._on_microphone_refresh()
+
+    def _recording_enabled_changed(self) -> None:
+        self._sync_recording_controls()
+
+    def _sync_recording_controls(self) -> None:
+        if not hasattr(self, "microphone_combo"):
+            return
+        enabled = self.is_recording_enabled()
+        combo_state = "readonly" if enabled and self._microphone_available else "disabled"
+        self.microphone_combo.configure(state=combo_state)
+        self.btn_refresh_microphones.configure(state=("normal" if enabled else "disabled"))
     
     def _apply_calib_ui_state(self) -> None:
         """キャリブ中は再開系の操作を事故防止のため無効化する。"""
@@ -761,5 +791,3 @@ class ChatWindow(tk.Tk):
     def is_trend_enabled(self) -> bool:
         return self.use_trend_var.get()
     
-
-

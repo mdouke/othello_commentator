@@ -121,7 +121,12 @@ def bootstrap_application(script_path: Path, logger: logging.Logger) -> Bootstra
 
     def on_start():
         reset_start_time()
-        if not ui_state.prompt_gate_open:
+        recording_enabled = (
+            app.is_recording_enabled()
+            if hasattr(app, "is_recording_enabled")
+            else True
+        )
+        if not ui_state.prompt_gate_open and recording_enabled:
             try:
                 if hasattr(app, "get_selected_microphone_device"):
                     audio_recorder.device = app.get_selected_microphone_device()
@@ -130,6 +135,8 @@ def bootstrap_application(script_path: Path, logger: logging.Logger) -> Bootstra
             except RuntimeError as exc:
                 ui_feedback.append_system_log(f"audio recording unavailable: {exc}")
                 logger.warning(f"audio recording unavailable: {exc}")
+        elif not ui_state.prompt_gate_open:
+            ui_feedback.append_system_log("audio recording disabled")
         turn = app.get_start_turn() if hasattr(app, "get_start_turn") else "B"
         send(f"START:TURN={turn}")
         ui_feedback.append_system_log("START sent")
